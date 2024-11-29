@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>impact_point_estimator</name>
+  <version>0.0.0</version>
+  <description>TODO: Package description</description>
+  <maintainer email="s24s1040du@s.chibakoudai.jp">ryo</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>visualization_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>Eigen3</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
