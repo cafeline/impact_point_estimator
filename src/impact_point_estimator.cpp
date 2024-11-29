@@ -9,6 +9,7 @@ namespace impact_point_estimator
   ImpactPointEstimator::ImpactPointEstimator(const std::string &name_space, const rclcpp::NodeOptions &options)
       : rclcpp::Node("impact_point_estimator", name_space, options)
   {
+    RCLCPP_INFO(this->get_logger(), "impact_point_estimatorの初期化");
     // パラメータの宣言
     this->declare_parameter<double>("distance_threshold", 1.5);
     distance_threshold_ = this->get_parameter("distance_threshold").as_double();
@@ -31,36 +32,18 @@ namespace impact_point_estimator
   {
     if (is_predicting_)
     {
-      // 予測中のため、メッセージを無視します。
-      return;
-    }
-
-    if (msg->type != visualization_msgs::msg::Marker::SPHERE || msg->action == visualization_msgs::msg::Marker::DELETE)
-    {
-      RCLCPP_INFO(this->get_logger(), "MarkerがSPHEREではないか、DELETEアクションです。");
+      // 予測中のため、メッセージを無視
       return;
     }
 
     geometry_msgs::msg::Point point = msg->pose.position;
-
-    double distance = 0.0;
-    if (!points_.empty())
-    {
-      auto centroid = calculate_centroid();
-      distance = calculate_distance(point, centroid);
-    }
-
-    // セントロイドからの距離が閾値以内かチェック
-    if (!points_.empty() && distance > distance_threshold_)
-    {
-      RCLCPP_INFO(this->get_logger(), "点がセントロイドから閾値 %.2f メートルを超えているため、無視します。", distance_threshold_);
-      return;
-    }
-
-    points_.emplace_back(point.x, point.y, point.z);
+    points_.emplace_back(point);
     RCLCPP_INFO(this->get_logger(), "点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
 
-    if (points_.size() >= 3)
+    // 点間の距離をチェックし、0.3m以上の点を除外
+    // filter_points(0.3);
+
+    if (points_.size() >= 4)
     {
       fit_cubic_curve();
       RCLCPP_INFO(this->get_logger(), "markerの公開開始");
@@ -68,11 +51,49 @@ namespace impact_point_estimator
     }
   }
 
-  double ImpactPointEstimator::calculate_distance(const geometry_msgs::msg::Point &point, const std::tuple<double, double, double> &centroid)
+  void ImpactPointEstimator::filter_points(double max_distance)
   {
-    return std::sqrt(std::pow(point.x - std::get<0>(centroid), 2) +
-                     std::pow(point.y - std::get<1>(centroid), 2) +
-                     std::pow(point.z - std::get<2>(centroid), 2));
+    if (points_.empty())
+        return;
+
+    std::vector<geometry_msgs::msg::Point> filtered_points;
+
+    for (size_t i = 0; i < points_.size(); ++i)
+    {
+        bool is_within_threshold = false;
+        for (size_t j = 0; j < points_.size(); ++j)
+        {
+            if (i == j)
+                continue;
+            double dist = calculate_distance(points_[i], points_[j]);
+            if (dist < max_distance)
+            {
+                is_within_threshold = true;
+                break;
+            }
+        }
+        if (is_within_threshold)
+        {
+            filtered_points.push_back(points_[i]);
+        }
+        else
+        {
+            RCLCPP_INFO(this->get_logger(),
+                "点が基準距離 %.2f m 内に他の点がないため、除外します。点: (%.2f, %.2f, %.2f)",
+                max_distance,
+                points_[i].x, points_[i].y, points_[i].z);
+        }
+    }
+
+    points_ = filtered_points;
+    RCLCPP_INFO(this->get_logger(), "フィルタリング後の点数: %zu", points_.size());
+  }
+
+  double ImpactPointEstimator::calculate_distance(const geometry_msgs::msg::Point &a, const geometry_msgs::msg::Point &b)
+  {
+    return std::sqrt(std::pow(a.x - b.x, 2) +
+                     std::pow(a.y - b.y, 2) +
+                     std::pow(a.z - b.z, 2));
   }
 
   std::tuple<double, double, double> ImpactPointEstimator::calculate_centroid()
@@ -80,9 +101,9 @@ namespace impact_point_estimator
     double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
     for (const auto &pt : points_)
     {
-      sum_x += pt.x();
-      sum_y += pt.y();
-      sum_z += pt.z();
+      sum_x += pt.x;
+      sum_y += pt.y;
+      sum_z += pt.z;
     }
     size_t n = points_.size();
     return {sum_x / n, sum_y / n, sum_z / n};
@@ -111,9 +132,9 @@ namespace impact_point_estimator
     Eigen::VectorXd x(n), y(n), z(n);
     for (size_t i = 0; i < n; ++i)
     {
-      x(i) = points_[i].x();
-      y(i) = points_[i].y();
-      z(i) = points_[i].z();
+      x(i) = points_[i].x;
+      y(i) = points_[i].y;
+      z(i) = points_[i].z;
     }
 
     Eigen::VectorXd coeffs_x = A.colPivHouseholderQr().solve(x);
@@ -145,7 +166,7 @@ namespace impact_point_estimator
     target_pose.y = curve_points.back().y;
     target_pose.theta = 0.0; // 必要に応じて角度を設定
     pose_publisher_->publish(target_pose);
-    RCLCPP_INFO(this->get_logger(), "最終点をPose2Dとして公開: x=%.2f, y=%.2f, theta=%.2f",
+    RCLCPP_INFO(this->get_logger(), "最終点Pose2Dとして公開: x=%.2f, y=%.2f, theta=%.2f",
                 target_pose.x, target_pose.y, target_pose.theta);
 
     // 点リストをリセット
@@ -207,9 +228,9 @@ namespace impact_point_estimator
     for (const auto &pt : points_)
     {
       geometry_msgs::msg::Point point;
-      point.x = pt.x();
-      point.y = pt.y();
-      point.z = pt.z();
+      point.x = pt.x;
+      point.y = pt.y;
+      point.z = pt.z;
       RCLCPP_INFO(this->get_logger(), "marker点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
       points_marker.points.push_back(point);
     }
