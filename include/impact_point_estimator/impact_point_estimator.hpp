@@ -32,7 +32,7 @@ namespace impact_point_estimator
     void publish_points_marker();
     void filter_points(double max_distance);
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr subscription_;
-    
+
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr points_publisher_;
     rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_publisher_;
@@ -41,5 +41,13 @@ namespace impact_point_estimator
     double distance_threshold_;
     bool is_predicting_;
     std::vector<geometry_msgs::msg::Point> points_;
+
+    // 10秒ごとにPose2Dをパブリッシュするためのタイマー
+    rclcpp::TimerBase::SharedPtr alternate_pose_timer_;
+    // ポーズのトグル用フラグ
+    bool toggle_pose_;
+
+    // タイマーコールバック関数
+    void publish_alternate_pose();
   };
 } // namespace impact_point_estimator
