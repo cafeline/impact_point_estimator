@@ -52,7 +52,7 @@ namespace impact_point_estimator
       filter_points(0.5);
     }
 
-      if (points_.size() >= 7)
+      if (points_.size() >= 3)
       {
         fit_cubic_curve();
         // RCLCPP_INFO(this->get_logger(), "markerの公開開始");
