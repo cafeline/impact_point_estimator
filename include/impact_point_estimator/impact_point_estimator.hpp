@@ -27,7 +27,7 @@ namespace impact_point_estimator
     void listener_callback(const visualization_msgs::msg::Marker::SharedPtr msg);
     double calculate_distance(const geometry_msgs::msg::Point &a, const geometry_msgs::msg::Point &b);
     std::tuple<double, double, double> calculate_centroid();
-    void fit_cubic_curve();
+    std::vector<geometry_msgs::msg::Point> fit_cubic_curve();
     void end_pause();
     void publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points);
     void publish_points_marker();
@@ -35,8 +35,9 @@ namespace impact_point_estimator
     void publish_final_pose(const geometry_msgs::msg::Point &final_point);
     void filter_points(double max_distance);
     void points_timeout_callback();
-    bool check_point_validity(const geometry_msgs::msg::Point &point);
 
+    bool check_point_validity(const geometry_msgs::msg::Point &point);
+    double calculate_time_to_height(double target_height);
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr subscription_;
 
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_;
@@ -58,7 +59,15 @@ namespace impact_point_estimator
     bool toggle_pose_;
 
     // 追加したメンバー変数
+    std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point end_time_;
+    bool start_time_initialized_ = false;
     std::chrono::steady_clock::time_point last_point_time_;
     rclcpp::TimerBase::SharedPtr points_timeout_timer_;
+
+    // カーブフィッティング用の係数
+    Eigen::VectorXd coeffs_x_;
+    Eigen::VectorXd coeffs_y_;
+    Eigen::VectorXd coeffs_z_;
   };
 } // namespace impact_point_estimator

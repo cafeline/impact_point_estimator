@@ -46,7 +46,16 @@ namespace impact_point_estimator
       return;
     }
 
-    last_point_time_ = std::chrono::steady_clock::now();
+    // 最初のポイント受信時にスタートタイムを設定
+    if (!start_time_initialized_)
+    {
+      start_time_ = std::chrono::steady_clock::now();
+      start_time_initialized_ = true;
+    }
+
+    end_time_ = std::chrono::steady_clock::now();
+    last_point_time_ = end_time_;
+
     geometry_msgs::msg::Point point = msg->pose.position;
     RCLCPP_DEBUG(this->get_logger(), "受信した点: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
 
@@ -59,7 +68,15 @@ namespace impact_point_estimator
         filter_points(0.5);
         if (points_.size() >= 3)
         {
-          fit_cubic_curve();
+          std::vector<geometry_msgs::msg::Point> curve_points = fit_cubic_curve();
+
+          // 着弾までの時間を計算
+          double target_height = 0.0; // 目標高さを設定（例：地面レベル）
+          double time_to_impact = calculate_time_to_height(target_height);
+          RCLCPP_INFO(this->get_logger(), "着弾までの時間: %.2f秒", time_to_impact);
+
+          publish_curve_marker(curve_points);
+          publish_final_pose(curve_points.back());
           publish_points_marker();
           points_.clear();
 
@@ -70,33 +87,6 @@ namespace impact_point_estimator
         }
       }
     }
-  }
-
-  void ImpactPointEstimator::filter_points(double max_distance)
-  {
-    if (points_.empty())
-      return;
-
-    std::vector<geometry_msgs::msg::Point> filtered_points;
-    for (const auto &pt : points_)
-    {
-      double min_dist = std::numeric_limits<double>::max();
-      for (const auto &other_pt : points_)
-      {
-        if (&pt == &other_pt)
-          continue;
-        double dist = calculate_distance(pt, other_pt);
-        if (dist < min_dist)
-          min_dist = dist;
-      }
-
-      if (min_dist <= max_distance)
-      {
-        filtered_points.push_back(pt);
-      }
-    }
-
-    points_ = std::move(filtered_points);
   }
 
   bool ImpactPointEstimator::check_point_validity(const geometry_msgs::msg::Point &point)
@@ -129,6 +119,32 @@ namespace impact_point_estimator
 
     return true;
   }
+  void ImpactPointEstimator::filter_points(double max_distance)
+  {
+    if (points_.empty())
+      return;
+
+    std::vector<geometry_msgs::msg::Point> filtered_points;
+    for (const auto &pt : points_)
+    {
+      double min_dist = std::numeric_limits<double>::max();
+      for (const auto &other_pt : points_)
+      {
+        if (&pt == &other_pt)
+          continue;
+        double dist = calculate_distance(pt, other_pt);
+        if (dist < min_dist)
+          min_dist = dist;
+      }
+
+      if (min_dist <= max_distance)
+      {
+        filtered_points.push_back(pt);
+      }
+    }
+
+    points_ = std::move(filtered_points);
+  }
 
   double ImpactPointEstimator::calculate_distance(const geometry_msgs::msg::Point &a, const geometry_msgs::msg::Point &b)
   {
@@ -148,11 +164,18 @@ namespace impact_point_estimator
     return {sum_x / n, sum_y / n, sum_z / n};
   }
 
-  void ImpactPointEstimator::fit_cubic_curve()
+  std::vector<geometry_msgs::msg::Point> ImpactPointEstimator::fit_cubic_curve()
   {
     is_predicting_ = true;
 
     size_t n = points_.size();
+    if (n < 3)
+    {
+      RCLCPP_WARN(this->get_logger(), "十分な点がありません。カーブのフィッティングをスキップします。");
+      is_predicting_ = false;
+      return {};
+    }
+
     Eigen::VectorXd t(n);
     for (size_t i = 0; i < n; ++i)
     {
@@ -176,18 +199,18 @@ namespace impact_point_estimator
       z(i) = points_[i].z;
     }
 
-    Eigen::VectorXd coeffs_x = A.colPivHouseholderQr().solve(x);
-    Eigen::VectorXd coeffs_y = A.colPivHouseholderQr().solve(y);
-    Eigen::VectorXd coeffs_z = A.colPivHouseholderQr().solve(z);
+    coeffs_x_ = A.colPivHouseholderQr().solve(x);
+    coeffs_y_ = A.colPivHouseholderQr().solve(y);
+    coeffs_z_ = A.colPivHouseholderQr().solve(z);
 
     // フィットされた曲線の生成
     std::vector<geometry_msgs::msg::Point> curve_points;
     for (size_t i = 0; i < 100; ++i)
     {
       double ti = static_cast<double>(i) / 99.0;
-      double xi = coeffs_x(0) * std::pow(ti, 3) + coeffs_x(1) * std::pow(ti, 2) + coeffs_x(2) * ti + coeffs_x(3);
-      double yi = coeffs_y(0) * std::pow(ti, 3) + coeffs_y(1) * std::pow(ti, 2) + coeffs_y(2) * ti + coeffs_y(3);
-      double zi = coeffs_z(0) * std::pow(ti, 3) + coeffs_z(1) * std::pow(ti, 2) + coeffs_z(2) * ti + coeffs_z(3);
+      double xi = coeffs_x_(0) * std::pow(ti, 3) + coeffs_x_(1) * std::pow(ti, 2) + coeffs_x_(2) * ti + coeffs_x_(3);
+      double yi = coeffs_y_(0) * std::pow(ti, 3) + coeffs_y_(1) * std::pow(ti, 2) + coeffs_y_(2) * ti + coeffs_y_(3);
+      double zi = coeffs_z_(0) * std::pow(ti, 3) + coeffs_z_(1) * std::pow(ti, 2) + coeffs_z_(2) * ti + coeffs_z_(3);
 
       geometry_msgs::msg::Point pt;
       pt.x = xi;
@@ -196,8 +219,27 @@ namespace impact_point_estimator
       curve_points.push_back(pt);
     }
 
-    publish_curve_marker(curve_points);
-    publish_final_pose(curve_points.back());
+    return curve_points;
+  }
+
+  double ImpactPointEstimator::calculate_time_to_height(double target_height)
+  {
+    // カーブのz(t) = a*t^3 + b*t^2 + c*t + d
+    for (double t = 0.0; t <= 1.0; t += 0.1)
+    {
+      double z = coeffs_z_(0) * std::pow(t, 3) + coeffs_z_(1) * std::pow(t, 2) + coeffs_z_(2) * t + coeffs_z_(3);
+      RCLCPP_INFO(this->get_logger(), "z(t)=%.2f", z);
+      RCLCPP_INFO(this->get_logger(), "target_height=%.2f", target_height);
+      if (z <= target_height)
+      {
+        // tを実際の時間にマッピング
+        std::chrono::duration<double> total_duration = end_time_ - start_time_;
+        double total_time = total_duration.count(); // 秒単位
+        double impact_time = t * total_time;
+        return impact_time;
+      }
+    }
+    return -1.0; // 指定した高さに達しない場合
   }
 
   void ImpactPointEstimator::publish_final_pose(const geometry_msgs::msg::Point &final_point)
@@ -301,4 +343,5 @@ namespace impact_point_estimator
       points_.clear();
     }
   }
+
 } // namespace impact_point_estimator
