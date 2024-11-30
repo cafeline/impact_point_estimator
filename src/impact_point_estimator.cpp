@@ -71,7 +71,7 @@ namespace impact_point_estimator
 
     if (!is_decreasing)
     {
-      RCLCPP_INFO(this->get_logger(), "スライディングウィンドウ内でxが減少していないため、点を無視: x=%.2f", point.x);
+      // RCLCPP_INFO(this->get_logger(), "スライディングウィンドウ内でxが減少していないため、点を無視: x=%.2f", point.x);
       return;
     }
 
@@ -84,7 +84,7 @@ namespace impact_point_estimator
                                   std::pow(point.z - previous_point.z, 2));
       if (distance >= 0.5)
       {
-        RCLCPP_INFO(this->get_logger(), "前の点との距離が0.3m以上のため、点を無視: 距離=%.2f", distance);
+        // RCLCPP_INFO(this->get_logger(), "前の点との距離が0.3m以上のため、点を無視: 距離=%.2f", distance);
         return;
       }
     }
@@ -92,10 +92,10 @@ namespace impact_point_estimator
     // 点を追加
     points_.emplace_back(point);
 
-    RCLCPP_INFO(this->get_logger(), "点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
+    // RCLCPP_INFO(this->get_logger(), "点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
 
     // 既存の処理
-    RCLCPP_INFO(this->get_logger(), "点の数: %zu", points_.size());
+    // RCLCPP_INFO(this->get_logger(), "点の数: %zu", points_.size());
     if (points_.size() >= 5)
     {
       filter_points(0.5);
@@ -218,16 +218,15 @@ namespace impact_point_estimator
     }
 
     publish_curve_marker(curve_points);
-    RCLCPP_INFO(this->get_logger(), "フィットされた曲線のMarkerを公開しました。");
 
     // 最終ポイントをPose2Dで公開
     geometry_msgs::msg::Pose2D target_pose;
     target_pose.x = curve_points.back().x;
     target_pose.y = curve_points.back().y;
     target_pose.theta = 0.0; // 必要に応じて角度を設定
-    // pose_publisher_->publish(target_pose);
-    // RCLCPP_INFO(this->get_logger(), "最終点Pose2Dとして公開: x=%.2f, y=%.2f, theta=%.2f",
-    //             target_pose.x, target_pose.y, target_pose.theta);
+    pose_publisher_->publish(target_pose);
+    RCLCPP_INFO(this->get_logger(), "着弾地点: x=%.2f, y=%.2f, theta=%.2f",
+                target_pose.x, target_pose.y, target_pose.theta);
   }
 
   void ImpactPointEstimator::end_pause()
@@ -278,14 +277,14 @@ namespace impact_point_estimator
     points_marker.color.a = 1.0;
     points_marker.lifetime = rclcpp::Duration(0, 0);
 
-    RCLCPP_INFO(this->get_logger(), "marker size: %zu", points_.size());
+    // RCLCPP_INFO(this->get_logger(), "marker size: %zu", points_.size());
     for (const auto &pt : points_)
     {
       geometry_msgs::msg::Point point;
       point.x = pt.x;
       point.y = pt.y;
       point.z = pt.z;
-      RCLCPP_INFO(this->get_logger(), "marker点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
+      // RCLCPP_INFO(this->get_logger(), "marker点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
       points_marker.points.push_back(point);
     }
 
@@ -312,9 +311,9 @@ namespace impact_point_estimator
     }
 
     // ターゲットPose2Dをパブリッシュ
-    pose_publisher_->publish(pose_msg);
-    RCLCPP_INFO(this->get_logger(), "Pose2Dをパブリッシュ: x=%.2f, y=%.2f, theta=%.2f rad",
-                pose_msg.x, pose_msg.y, pose_msg.theta);
+    // pose_publisher_->publish(pose_msg);
+    // RCLCPP_INFO(this->get_logger(), "Pose2Dをパブリッシュ: x=%.2f, y=%.2f, theta=%.2f rad",
+                // pose_msg.x, pose_msg.y, pose_msg.theta);
 
     // トグルフラグを反転
     toggle_pose_ = !toggle_pose_;
@@ -328,7 +327,6 @@ namespace impact_point_estimator
     if (duration_since_last_point.count() > 500)
     {
       points_.clear();
-      RCLCPP_INFO(this->get_logger(), "0.5秒間新しい点が受信されなかったため、points_をクリアしました。");
     }
   }
 } // namespace impact_point_estimator
