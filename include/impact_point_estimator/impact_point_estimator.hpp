@@ -32,8 +32,10 @@ namespace impact_point_estimator
     void publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points);
     void publish_points_marker();
     void publish_alternate_pose();
+    void publish_final_pose(const geometry_msgs::msg::Point &final_point);
     void filter_points(double max_distance);
     void points_timeout_callback();
+    bool check_point_validity(const geometry_msgs::msg::Point &point);
 
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr subscription_;
 
@@ -47,7 +49,6 @@ namespace impact_point_estimator
     std::vector<geometry_msgs::msg::Point> points_;
 
     // 前回の点を保持
-    geometry_msgs::msg::Point previous_point_;
     bool has_previous_point_ = false;
     std::deque<geometry_msgs::msg::Point> recent_points_;
 

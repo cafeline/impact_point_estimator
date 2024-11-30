@@ -4,112 +4,70 @@ using namespace std::chrono_literals;
 
 namespace impact_point_estimator
 {
-  ImpactPointEstimator::ImpactPointEstimator(const rclcpp::NodeOptions &options) : ImpactPointEstimator("", options) {}
+  ImpactPointEstimator::ImpactPointEstimator(const rclcpp::NodeOptions &options)
+      : ImpactPointEstimator("", options) {}
 
   ImpactPointEstimator::ImpactPointEstimator(const std::string &name_space, const rclcpp::NodeOptions &options)
       : rclcpp::Node("impact_point_estimator", name_space, options),
-        toggle_pose_(false)
+        toggle_pose_(false),
+        is_predicting_(false)
   {
     RCLCPP_INFO(this->get_logger(), "impact_point_estimatorの初期化");
-    // パラメータの宣言
+
+    // パラメータの宣言と取得
     this->declare_parameter<double>("distance_threshold", 1.5);
     distance_threshold_ = this->get_parameter("distance_threshold").as_double();
 
-    // サブスクライバー: Markerメッセージを購読
+    // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
         "tennis_ball", 10, std::bind(&ImpactPointEstimator::listener_callback, this, std::placeholders::_1));
 
-    // パブリッシャー: フィッティングされた曲線をMarkerとして公開
+    // パブリッシャーの設定
     publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_curve", 10);
     points_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_points", 10);
-
-    // 新しいパブリッシャー: 最終点をPose2Dとして公開
     pose_publisher_ = this->create_publisher<geometry_msgs::msg::Pose2D>("/target_pose", 10);
 
-    // 10秒ごとに交互のPose2Dをパブリッシュするタイマーを設定
+    // タイマーの設定
     alternate_pose_timer_ = this->create_wall_timer(
-        std::chrono::seconds(10),
+        10s,
         std::bind(&ImpactPointEstimator::publish_alternate_pose, this));
 
-    // last_point_time_ を現在時刻で初期化
-    last_point_time_ = std::chrono::steady_clock::now();
-
-    // タイマーを初期化 (100ms ごとにコールバックを呼び出す)
     points_timeout_timer_ = this->create_wall_timer(
-      100ms,
-      std::bind(&ImpactPointEstimator::points_timeout_callback, this)
-    );
+        100ms,
+        std::bind(&ImpactPointEstimator::points_timeout_callback, this));
+
+    last_point_time_ = std::chrono::steady_clock::now();
   }
 
   void ImpactPointEstimator::listener_callback(const visualization_msgs::msg::Marker::SharedPtr msg)
   {
-    // 新しい点を受信したので、last_point_time_ を更新
-    last_point_time_ = std::chrono::steady_clock::now();
-
-    geometry_msgs::msg::Point point = msg->pose.position;
-
-    // デバッグ用に受信した点の情報を表示
-    RCLCPP_DEBUG(this->get_logger(), "受信した点: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
-
-    // スライディングウィンドウに点を追加
-    recent_points_.emplace_back(point);
-    if (recent_points_.size() >= 3)
+    if (is_predicting_)
     {
-      recent_points_.pop_front();
-    }
-
-    // ウィンドウ内の傾向を分析
-    bool is_decreasing = true;
-    for (size_t i = 1; i < recent_points_.size(); ++i)
-    {
-      if (recent_points_[i].x >= recent_points_[i - 1].x)
-      {
-        is_decreasing = false;
-        break;
-      }
-    }
-
-    if (!is_decreasing)
-    {
-      // RCLCPP_INFO(this->get_logger(), "スライディングウィンドウ内でxが減少していないため、点を無視: x=%.2f", point.x);
       return;
     }
 
-    // 前の点との距離をチェック
-    if (recent_points_.size() >= 2)
+    last_point_time_ = std::chrono::steady_clock::now();
+    geometry_msgs::msg::Point point = msg->pose.position;
+    RCLCPP_DEBUG(this->get_logger(), "受信した点: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
+
+    if (check_point_validity(point))
     {
-      const geometry_msgs::msg::Point &previous_point = recent_points_[recent_points_.size() - 2];
-      double distance = std::sqrt(std::pow(point.x - previous_point.x, 2) +
-                                  std::pow(point.y - previous_point.y, 2) +
-                                  std::pow(point.z - previous_point.z, 2));
-      if (distance >= 0.5)
+      points_.emplace_back(point);
+
+      if (points_.size() >= 3)
       {
-        // RCLCPP_INFO(this->get_logger(), "前の点との距離が0.3m以上のため、点を無視: 距離=%.2f", distance);
-        return;
-      }
-    }
+        filter_points(0.5);
+        if (points_.size() >= 3)
+        {
+          fit_cubic_curve();
+          publish_points_marker();
+          points_.clear();
 
-    // 点を追加
-    points_.emplace_back(point);
-
-    // RCLCPP_INFO(this->get_logger(), "点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
-
-    // 既存の処理
-    // RCLCPP_INFO(this->get_logger(), "点の数: %zu", points_.size());
-    if (points_.size() >= 5)
-    {
-      filter_points(0.5);
-      if (points_.size() >= 5)
-      {
-        fit_cubic_curve();
-        publish_points_marker();
-        // 点リストをリセット
-        points_.clear();
-
-        // 1秒間処理を停止するためのタイマーを開始
-        timer_ = this->create_wall_timer(
-            1s,
-            std::bind(&ImpactPointEstimator::end_pause, this));
+          // 処理を一時停止
+          timer_ = this->create_wall_timer(
+              1s,
+              std::bind(&ImpactPointEstimator::end_pause, this));
+        }
       }
     }
   }
@@ -120,40 +78,61 @@ namespace impact_point_estimator
       return;
 
     std::vector<geometry_msgs::msg::Point> filtered_points;
-    // RCLCPP_INFO(this->get_logger(), "フィルタリング開始: 現在の点数 %zu", points_.size());
-
-    for (size_t i = 0; i < points_.size(); ++i)
+    for (const auto &pt : points_)
     {
       double min_dist = std::numeric_limits<double>::max();
-      for (size_t j = 0; j < points_.size(); ++j)
+      for (const auto &other_pt : points_)
       {
-        if (i == j)
+        if (&pt == &other_pt)
           continue;
-
-        double dist = calculate_distance(points_[i], points_[j]);
+        double dist = calculate_distance(pt, other_pt);
         if (dist < min_dist)
           min_dist = dist;
       }
 
       if (min_dist <= max_distance)
       {
-        filtered_points.push_back(points_[i]);
-      }
-      else
-      {
-        // RCLCPP_INFO(this->get_logger(), "点を除去: x=%.2f, y=%.2f, z=%.2f", points_[i].x, points_[i].y, points_[i].z);
+        filtered_points.push_back(pt);
       }
     }
 
     points_ = std::move(filtered_points);
-    // RCLCPP_INFO(this->get_logger(), "フィルタリング後の点数: %zu", points_.size());
+  }
+
+  bool ImpactPointEstimator::check_point_validity(const geometry_msgs::msg::Point &point)
+  {
+    // スライディングウィンドウに点を追加
+    recent_points_.emplace_back(point);
+    if (recent_points_.size() > 3)
+    {
+      recent_points_.pop_front();
+    }
+
+    // x座標が減少しているか確認
+    for (size_t i = 1; i < recent_points_.size(); ++i)
+    {
+      if (recent_points_[i].x >= recent_points_[i - 1].x)
+      {
+        return false;
+      }
+    }
+
+    // 前の点との距離をチェック
+    if (points_.size() >= 1)
+    {
+      double distance = calculate_distance(point, points_.back());
+      if (distance >= 0.5)
+      {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   double ImpactPointEstimator::calculate_distance(const geometry_msgs::msg::Point &a, const geometry_msgs::msg::Point &b)
   {
-    return std::sqrt(std::pow(a.x - b.x, 2) +
-                     std::pow(a.y - b.y, 2) +
-                     std::pow(a.z - b.z, 2));
+    return std::hypot(a.x - b.x, std::hypot(a.y - b.y, a.z - b.z));
   }
 
   std::tuple<double, double, double> ImpactPointEstimator::calculate_centroid()
@@ -201,7 +180,7 @@ namespace impact_point_estimator
     Eigen::VectorXd coeffs_y = A.colPivHouseholderQr().solve(y);
     Eigen::VectorXd coeffs_z = A.colPivHouseholderQr().solve(z);
 
-    // フィットされた曲線を生成
+    // フィットされた曲線の生成
     std::vector<geometry_msgs::msg::Point> curve_points;
     for (size_t i = 0; i < 100; ++i)
     {
@@ -218,12 +197,15 @@ namespace impact_point_estimator
     }
 
     publish_curve_marker(curve_points);
+    publish_final_pose(curve_points.back());
+  }
 
-    // 最終ポイントをPose2Dで公開
+  void ImpactPointEstimator::publish_final_pose(const geometry_msgs::msg::Point &final_point)
+  {
     geometry_msgs::msg::Pose2D target_pose;
-    target_pose.x = curve_points.back().x;
-    target_pose.y = curve_points.back().y;
-    target_pose.theta = 0.0; // 必要に応じて角度を設定
+    target_pose.x = final_point.x;
+    target_pose.y = final_point.y;
+    target_pose.theta = 0.0; // 必要に応じて設定
     pose_publisher_->publish(target_pose);
     RCLCPP_INFO(this->get_logger(), "着弾地点: x=%.2f, y=%.2f, theta=%.2f",
                 target_pose.x, target_pose.y, target_pose.theta);
@@ -246,20 +228,19 @@ namespace impact_point_estimator
     curve_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
     curve_marker.action = visualization_msgs::msg::Marker::ADD;
     curve_marker.scale.x = 0.02; // 線の太さ
+
+    // 色の設定を修正
     curve_marker.color.r = 1.0;
     curve_marker.color.g = 0.0;
     curve_marker.color.b = 0.0;
     curve_marker.color.a = 1.0;
 
     curve_marker.points = curve_points;
-
     publisher_->publish(curve_marker);
   }
 
   void ImpactPointEstimator::publish_points_marker()
   {
-    RCLCPP_INFO(this->get_logger(), "markerの公開");
-
     visualization_msgs::msg::Marker points_marker;
     points_marker.header.frame_id = "map";
     points_marker.header.stamp = this->get_clock()->now();
@@ -268,24 +249,22 @@ namespace impact_point_estimator
     points_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
     points_marker.action = visualization_msgs::msg::Marker::ADD;
 
-    points_marker.scale.x = 0.07; // 各ポイントのサイズ
+    // スケールの設定を修正
+    points_marker.scale.x = 0.07;
     points_marker.scale.y = 0.07;
     points_marker.scale.z = 0.07;
+
+    // 色の設定を修正
     points_marker.color.r = 0.0;
     points_marker.color.g = 1.0;
     points_marker.color.b = 0.5;
     points_marker.color.a = 1.0;
+
     points_marker.lifetime = rclcpp::Duration(0, 0);
 
-    // RCLCPP_INFO(this->get_logger(), "marker size: %zu", points_.size());
     for (const auto &pt : points_)
     {
-      geometry_msgs::msg::Point point;
-      point.x = pt.x;
-      point.y = pt.y;
-      point.z = pt.z;
-      // RCLCPP_INFO(this->get_logger(), "marker点の追加: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
-      points_marker.points.push_back(point);
+      points_marker.points.emplace_back(pt);
     }
 
     points_publisher_->publish(points_marker);
@@ -297,25 +276,18 @@ namespace impact_point_estimator
 
     if (toggle_pose_)
     {
-      // (-1, -1.5, 30°)
       pose_msg.x = -1.0;
       pose_msg.y = -1.5;
-      pose_msg.theta = 30.0 * M_PI / 180.0; // ラジアンに変換
+      pose_msg.theta = M_PI / 6.0; // 30°
     }
     else
     {
-      // (1, -1.5, -30°)
       pose_msg.x = 1.0;
       pose_msg.y = -1.5;
-      pose_msg.theta = -30.0 * M_PI / 180.0; // ラジアンに変換
+      pose_msg.theta = -M_PI / 6.0; // -30°
     }
 
-    // ターゲットPose2Dをパブリッシュ
-    // pose_publisher_->publish(pose_msg);
-    // RCLCPP_INFO(this->get_logger(), "Pose2Dをパブリッシュ: x=%.2f, y=%.2f, theta=%.2f rad",
-                // pose_msg.x, pose_msg.y, pose_msg.theta);
-
-    // トグルフラグを反転
+    pose_publisher_->publish(pose_msg);
     toggle_pose_ = !toggle_pose_;
   }
 
