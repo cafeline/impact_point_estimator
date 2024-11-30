@@ -26,6 +26,7 @@ namespace impact_point_estimator
     publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_curve", 10);
     points_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_points", 10);
     pose_publisher_ = this->create_publisher<geometry_msgs::msg::Pose2D>("/target_pose", 10);
+    motor_pos_publisher_ = this->create_publisher<std_msgs::msg::Float64>("motor/pos", 10);
 
     // タイマーの設定
     alternate_pose_timer_ = this->create_wall_timer(
@@ -37,6 +38,11 @@ namespace impact_point_estimator
         std::bind(&ImpactPointEstimator::points_timeout_callback, this));
 
     last_point_time_ = std::chrono::steady_clock::now();
+
+    motor_pos_ = this->get_parameter("motor_pos").as_double();
+    offset_time_ = this->get_parameter("offset_time").as_double();
+    curve_points_num_ = this->get_parameter("curve_points_num").as_int();
+    RCLCPP_INFO(this->get_logger(), "motor_pos: %.2f, offset_time: %.2f, curve_points_num: %d", motor_pos_, offset_time_, curve_points_num_);
   }
 
   void ImpactPointEstimator::listener_callback(const visualization_msgs::msg::Marker::SharedPtr msg)
@@ -63,10 +69,10 @@ namespace impact_point_estimator
     {
       points_.emplace_back(point);
 
-      if (points_.size() >= 3)
+      if (points_.size() >= curve_points_num_)
       {
         filter_points(0.5);
-        if (points_.size() >= 3)
+        if (points_.size() >= curve_points_num_)
         {
           std::vector<geometry_msgs::msg::Point> curve_points = fit_cubic_curve();
 
@@ -78,15 +84,37 @@ namespace impact_point_estimator
           publish_curve_marker(curve_points);
           publish_final_pose(curve_points.back());
           publish_points_marker();
+
+          // 着弾時間分待ってからモーター位置を発行
+          if (time_to_impact > 0.0)
+          {
+            auto delay_ms = static_cast<int>((time_to_impact + offset_time_) * 1000);
+            timer_ = this->create_wall_timer(
+                std::chrono::milliseconds(delay_ms),
+                [this]()
+                {
+                  publish_motor_pos(motor_pos_);
+                  timer_->cancel();
+                });
+          }
+
           points_.clear();
 
           // 処理を一時停止
-          timer_ = this->create_wall_timer(
+          pause_timer_ = this->create_wall_timer(
               1s,
               std::bind(&ImpactPointEstimator::end_pause, this));
         }
       }
     }
+  }
+
+  void ImpactPointEstimator::publish_motor_pos(double angle_rad)
+  {
+    auto message = std_msgs::msg::Float64();
+    message.data = angle_rad;
+    motor_pos_publisher_->publish(message);
+    RCLCPP_INFO(this->get_logger(), "Published angle: %f rad", angle_rad);
   }
 
   bool ImpactPointEstimator::check_point_validity(const geometry_msgs::msg::Point &point)
@@ -227,8 +255,8 @@ namespace impact_point_estimator
     // 点が2つ未満の場合は計算不可能
     if (points_.size() < 2)
     {
-        RCLCPP_WARN(this->get_logger(), "十分な点がありません。着弾時間を計算できません。");
-        return -1.0;
+      RCLCPP_WARN(this->get_logger(), "十分な点がありません。着弾時間を計算できません。");
+      return -1.0;
     }
 
     // 計算に使用する最初と最後の点を取得
@@ -253,9 +281,9 @@ namespace impact_point_estimator
     // 二次方程式の係数を設定
     // z = z0 + v0*t - (1/2)*g*t^2 から
     // (1/2)*g*t^2 - v0*t + (z0 - z_target) = 0 の形に変形
-    double a = 0.5 * 9.81;    // 重力加速度の1/2
-    double b = -v0;           // 初期速度の負値
-    double c = z0 - target_height;  // 初期高さと目標高さの差
+    double a = 0.5 * 9.81;         // 重力加速度の1/2
+    double b = -v0;                // 初期速度の負値
+    double c = z0 - target_height; // 初期高さと目標高さの差
 
     // 判別式の計算 (b^2 - 4ac)
     double discriminant = b * b - 4 * a * c;
@@ -263,14 +291,14 @@ namespace impact_point_estimator
     // 判別式が負の場合、解なし（目標高さに到達しない）
     if (discriminant < 0)
     {
-        RCLCPP_WARN(this->get_logger(), "目標高さに達しません。");
-        return -1.0;
+      RCLCPP_WARN(this->get_logger(), "目標高さに達しません。");
+      return -1.0;
     }
 
     // 二次方程式の解を計算
     double sqrt_discriminant = std::sqrt(discriminant);
-    double t1 = (-b + sqrt_discriminant) / (2 * a);  // 解1
-    double t2 = (-b - sqrt_discriminant) / (2 * a);  // 解2
+    double t1 = (-b + sqrt_discriminant) / (2 * a); // 解1
+    double t2 = (-b - sqrt_discriminant) / (2 * a); // 解2
 
     // 有効な解（着弾時間）を初期化
     double impact_time = -1.0;
@@ -278,27 +306,26 @@ namespace impact_point_estimator
     // 正の解のうち、小さい方を選択
     if (t1 >= 0 && t2 >= 0)
     {
-        impact_time = std::min(t1, t2);
+      impact_time = std::min(t1, t2);
     }
-    else if (t1 >= 0)  // t1のみが正の場合
+    else if (t1 >= 0) // t1のみが正の場合
     {
-        impact_time = t1;
+      impact_time = t1;
     }
-    else if (t2 >= 0)  // t2のみが正の場合
+    else if (t2 >= 0) // t2のみが正の場合
     {
-        impact_time = t2;
+      impact_time = t2;
     }
 
     // 有効な解が見つかった場合
     if (impact_time >= 0)
     {
-        RCLCPP_INFO(this->get_logger(), "着弾までの時間: %.2f秒", impact_time);
-        return impact_time;
+      return impact_time;
     }
-    else  // 有効な解が見つからなかった場合
+    else // 有効な解が見つからなかった場合
     {
-        RCLCPP_WARN(this->get_logger(), "有効な着弾時間を見つけられませんでした。");
-        return -1.0;
+      RCLCPP_WARN(this->get_logger(), "有効な着弾時間を見つけられませんでした。");
+      return -1.0;
     }
   }
 
@@ -317,7 +344,7 @@ namespace impact_point_estimator
   {
     is_predicting_ = false;
     timer_->cancel();
-    RCLCPP_INFO(this->get_logger(), "1秒間の処理停止が終了しました。");
+    // RCLCPP_INFO(this->get_logger(), "1秒間の処理停止が終了しました。");
   }
 
   void ImpactPointEstimator::publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points)
