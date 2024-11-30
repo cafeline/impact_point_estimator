@@ -10,6 +10,7 @@
 #include <cmath>
 #include <chrono>
 #include <eigen3/Eigen/Dense>
+#include <deque>
 
 namespace impact_point_estimator
 {
@@ -30,7 +31,10 @@ namespace impact_point_estimator
     void end_pause();
     void publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points);
     void publish_points_marker();
+    void publish_alternate_pose();
     void filter_points(double max_distance);
+    void points_timeout_callback();
+
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr subscription_;
 
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_;
@@ -42,12 +46,18 @@ namespace impact_point_estimator
     bool is_predicting_;
     std::vector<geometry_msgs::msg::Point> points_;
 
+    // 前回の点を保持
+    geometry_msgs::msg::Point previous_point_;
+    bool has_previous_point_ = false;
+    std::deque<geometry_msgs::msg::Point> recent_points_;
+
     // 10秒ごとにPose2Dをパブリッシュするためのタイマー
     rclcpp::TimerBase::SharedPtr alternate_pose_timer_;
     // ポーズのトグル用フラグ
     bool toggle_pose_;
 
-    // タイマーコールバック関数
-    void publish_alternate_pose();
+    // 追加したメンバー変数
+    std::chrono::steady_clock::time_point last_point_time_;
+    rclcpp::TimerBase::SharedPtr points_timeout_timer_;
   };
 } // namespace impact_point_estimator
