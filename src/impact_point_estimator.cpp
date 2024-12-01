@@ -416,7 +416,7 @@ namespace impact_point_estimator
       pose_msg.theta = -M_PI / 6.0; // -30°
     }
 
-    pose_publisher_->publish(pose_msg);
+    // pose_publisher_->publish(pose_msg);
     toggle_pose_ = !toggle_pose_;
   }
 
