@@ -11,10 +11,10 @@ namespace impact_point_estimator
 
     // スライディングウィンドウに点を追加
     recent_points.emplace_back(point);
-    if (recent_points.size() > 3)
-    {
+    // if (recent_points.size() > 3)
+    // {
       recent_points.pop_front();
-    }
+    // }
 
     // x座標が減少しているか確認
     for (size_t i = 1; i < recent_points.size(); ++i)
@@ -29,10 +29,10 @@ namespace impact_point_estimator
     if (!points.empty())
     {
       double distance = calculate_distance(point, points.back());
-      if (distance >= distance_threshold)
-      {
-        return false;
-      }
+      // if (distance >= distance_threshold)
+      // {
+      //   return false;
+      // }
     }
 
     return true;
