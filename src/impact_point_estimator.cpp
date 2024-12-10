@@ -45,10 +45,12 @@ namespace impact_point_estimator
 
   void ImpactPointEstimator::listener_callback(const visualization_msgs::msg::Marker::SharedPtr msg)
   {
+    RCLCPP_INFO(this->get_logger(), "0");
     if (is_predicting_)
     {
       return;
     }
+    RCLCPP_INFO(this->get_logger(), "1");
 
     // 最初のポイント受信時にスタートタイムを設定
     if (!start_time_initialized_)
@@ -56,35 +58,43 @@ namespace impact_point_estimator
       start_time_ = std::chrono::steady_clock::now();
       start_time_initialized_ = true;
     }
-
+    RCLCPP_INFO(this->get_logger(), "2");
     end_time_ = std::chrono::steady_clock::now();
     last_point_time_ = end_time_;
 
     geometry_msgs::msg::Point point = msg->pose.position;
     RCLCPP_DEBUG(this->get_logger(), "受信した点: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
-
-    if (filter_.check_point_validity(point, points_, recent_points_, distance_threshold_))
+    double limit_z = 1.0;
+    RCLCPP_INFO(this->get_logger(), "3");
+    if (filter_.check_point_validity(point, points_, recent_points_, limit_z, distance_threshold_))
     {
+      RCLCPP_INFO(this->get_logger(), "4");
       points_.emplace_back(point);
+      RCLCPP_INFO(this->get_logger(), "points_.size: %d", points_.size());
+      RCLCPP_INFO(this->get_logger(), "curve_points_num_: %d", curve_points_num_);
 
       if (points_.size() >= curve_points_num_)
       {
+        RCLCPP_INFO(this->get_logger(), "5");
         filter_.filter_points(points_, 0.5);
         if (points_.size() >= curve_points_num_)
         {
+          RCLCPP_INFO(this->get_logger(), "6");
           Eigen::VectorXd coeffs_x, coeffs_y, coeffs_z;
           std::vector<geometry_msgs::msg::Point> curve_points = prediction_.fit_cubic_curve(points_, coeffs_x, coeffs_y, coeffs_z);
-
+          RCLCPP_INFO(this->get_logger(), "7");
           // 着弾までの時間を計算
           double target_height = 0.0;
           double time_to_impact = prediction_.calculate_time_to_height(points_, start_time_, end_time_, target_height);
           RCLCPP_INFO(this->get_logger(), "着弾までの時間: %.2f秒", time_to_impact);
-
+          RCLCPP_INFO(this->get_logger(), "8");
           publish_curve_marker(curve_points);
+          RCLCPP_INFO(this->get_logger(), "9");
           publish_final_pose(curve_points.back());
+          RCLCPP_INFO(this->get_logger(), "10");
           publish_points_marker();
 
-          // 着弾時間分待ってからモーター位置を発行
+          // 着弾時間が有効な場合のみタイマーを作成
           if (time_to_impact > 0.0)
           {
             auto delay_ms = static_cast<int>((time_to_impact + offset_time_) * 1000);
@@ -95,6 +105,10 @@ namespace impact_point_estimator
                   publish_motor_pos(motor_pos_);
                   timer_->cancel();
                 });
+          }
+          else
+          {
+            RCLCPP_WARN(this->get_logger(), "有効な着弾時間が計算できませんでした。モーター位置の発行をスキップします。");
           }
 
           points_.clear();
@@ -119,7 +133,10 @@ namespace impact_point_estimator
   void ImpactPointEstimator::end_pause()
   {
     is_predicting_ = false;
-    timer_->cancel();
+    if (timer_)
+    {
+        timer_->cancel();
+    }
     // RCLCPP_INFO(this->get_logger(), "1秒間の処理停止が終了しました。");
   }
 

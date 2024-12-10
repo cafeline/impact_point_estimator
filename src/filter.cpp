@@ -2,8 +2,13 @@
 
 namespace impact_point_estimator
 {
-  bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::vector<geometry_msgs::msg::Point> &points, std::deque<geometry_msgs::msg::Point> &recent_points, double distance_threshold)
+  bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::vector<geometry_msgs::msg::Point> &points, std::deque<geometry_msgs::msg::Point> &recent_points, double limit_z, double distance_threshold)
   {
+    if (point.z < limit_z)
+    {
+      return false;
+    }
+
     // スライディングウィンドウに点を追加
     recent_points.emplace_back(point);
     if (recent_points.size() > 3)
