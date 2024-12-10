@@ -10,6 +10,8 @@ ament_auto_find_build_dependencies()
 
 ament_auto_add_library(impact_point_estimator
   src/impact_point_estimator.cpp
+  src/filter.cpp
+  src/prediction.cpp
 )
 
 ament_export_include_directories(include)
