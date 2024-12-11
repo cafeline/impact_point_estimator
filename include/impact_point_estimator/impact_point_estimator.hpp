@@ -43,6 +43,8 @@ namespace impact_point_estimator
     void publish_points_marker();
     void publish_final_pose(const geometry_msgs::msg::Point &final_point);
     void publish_motor_pos(double angle_rad);
+    void timer_callback(double x, double y); // 新規追加
+    void schedule_standby_and_reroad(double delay);
 
     // タイマー制御
     void schedule_motor_position(double delay);
@@ -66,12 +68,16 @@ namespace impact_point_estimator
     // 時間管理
     std::chrono::steady_clock::time_point last_point_time_;
     rclcpp::TimerBase::SharedPtr points_timeout_timer_;
-    std::shared_ptr<rclcpp::TimerBase> target_pose_timer_;
-
+    rclcpp::TimerBase::SharedPtr target_pose_timer_;
+    rclcpp::TimerBase::SharedPtr standby_timer_;
     // パラメータ
     double motor_pos_;
     double offset_time_;
     int curve_points_num_;
+    double standby_pose_x_;
+    double standby_pose_y_;
+    double reroad_;
+    double target_height_;
 
     Filter filter_;
     Prediction prediction_;

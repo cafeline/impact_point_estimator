@@ -16,11 +16,14 @@ namespace impact_point_estimator
   {
     RCLCPP_INFO(this->get_logger(), "impact_point_estimatorの初期化");
 
-    this->declare_parameter<double>("distance_threshold", 1.5);
     distance_threshold_ = this->get_parameter("distance_threshold").as_double();
     motor_pos_ = this->get_parameter("motor_pos").as_double();
     offset_time_ = this->get_parameter("offset_time").as_double();
     curve_points_num_ = this->get_parameter("curve_points_num").as_int();
+    standby_pose_x_ = this->get_parameter("standby_pose_x").as_double();
+    standby_pose_y_ = this->get_parameter("standby_pose_y").as_double();
+    reroad_ = this->get_parameter("reroad").as_double();
+    target_height_ = this->get_parameter("target_height").as_double(); // 取得
 
     // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
@@ -43,13 +46,10 @@ namespace impact_point_estimator
   {
     if (!is_predicting_)
     {
-      RCLCPP_INFO(this->get_logger(), "is_predicting_ is false");
       return;
     }
-    RCLCPP_INFO(this->get_logger(), "points_size: %d", (int)points_.size());
 
     geometry_msgs::msg::Point point = msg->pose.position;
-    RCLCPP_INFO(this->get_logger(), "point: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
 
     // 現在時刻を取得
     auto now = std::chrono::steady_clock::now();
@@ -78,15 +78,20 @@ namespace impact_point_estimator
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
-      RCLCPP_INFO(this->get_logger(), "points_.size(): %zu", points_.size());
       RCLCPP_INFO(this->get_logger(), "curve_points_num_ に達しました。process_points を呼び出します。");
       prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result)
                                  {
         if (result.success)
         {
+          // 予測が成功したらすぐに着弾地点をpublish
           publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact,
                                    result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
+          // impact_time 後に motor_pos_ をパブリッシュ
           schedule_motor_position(result.impact_time + offset_time_);
+
+          // impact_time + 3秒後に standby_pose と reroad_ をpublish
+          double standby_delay = result.impact_time + offset_time_ + 3.0;
+          schedule_standby_and_reroad(standby_delay);
         }
         pause_processing(); });
       clear_data();
@@ -118,49 +123,18 @@ namespace impact_point_estimator
       double x0, double y0, double z0,
       double vx, double vy, double vz)
   {
-    RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.2f, %.2f)", impact_time, x_impact, y_impact);
+    RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.2f, %.2f), height=%.2f", impact_time, x_impact, y_impact, target_height_);
 
     // 可視化用に軌道をプロット
     std::vector<geometry_msgs::msg::Point> trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
     publish_curve_marker(trajectory_points);
 
-    // // 最終着弾点を送信
-    // geometry_msgs::msg::Point final_point;
-    // final_point.x = x_impact;
-    // final_point.y = y_impact;
-    // final_point.z = 0.0;
-    // publish_final_pose(final_point);
-    // publish_points_marker();
-    publish_final_pose_delayed(x_impact, y_impact, impact_time);
-  }
-
-  void ImpactPointEstimator::publish_final_pose_delayed(double x_impact, double y_impact, double delay_seconds)
-  {
-    if (delay_seconds > 0.0)
-    {
-      auto delay_ms = static_cast<int>(delay_seconds * 1000);
-      // クラスメンバとしてタイマーを作成
-      target_pose_timer_ = this->create_wall_timer(
-          std::chrono::milliseconds(delay_ms),
-          [this, x_impact, y_impact, delay_seconds]()
-          {
-            geometry_msgs::msg::Point final_point;
-            final_point.x = x_impact;
-            final_point.y = y_impact;
-            final_point.z = 0.0;
-            publish_final_pose(final_point);
-            // タイマーをキャンセルしてリソースを解放
-            target_pose_timer_->cancel();
-          });
-    }
-    else
-    {
-      geometry_msgs::msg::Point final_point;
-      final_point.x = x_impact;
-      final_point.y = y_impact;
-      final_point.z = 0.0;
-      publish_final_pose(final_point);
-    }
+    // 着弾地点をすぐにpublish
+    geometry_msgs::msg::Point final_point;
+    final_point.x = x_impact;
+    final_point.y = y_impact;
+    final_point.z = target_height_; // YAMLから読み込んだ高さをセット(ログ用)
+    publish_final_pose(final_point);
   }
 
   void ImpactPointEstimator::publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points)
@@ -220,22 +194,71 @@ namespace impact_point_estimator
     target_pose.y = final_point.y;
     target_pose.theta = 0.0;
     pose_publisher_->publish(target_pose);
-    RCLCPP_INFO(this->get_logger(), "着弾地点: x=%.2f, y=%.2f, theta=%.2f",
-                target_pose.x, target_pose.y, target_pose.theta);
+    RCLCPP_INFO(this->get_logger(), "Immediately Published target_pose: x=%.2f, y=%.2f (height=%.2f), theta=%.2f",
+                target_pose.x, target_pose.y, final_point.z, target_pose.theta);
   }
 
   void ImpactPointEstimator::schedule_motor_position(double delay)
   {
     if (delay > 0.0)
     {
-      auto delay_ms = static_cast<int>(delay * 1000);
+      auto delay_ms = std::chrono::milliseconds(static_cast<int>(delay * 1000));
       timer_ = this->create_wall_timer(
-          std::chrono::milliseconds(delay_ms),
+          delay_ms,
           [this]()
           {
             publish_motor_pos(motor_pos_);
             timer_->cancel();
           });
+    }
+    else
+    {
+      publish_motor_pos(motor_pos_);
+    }
+  }
+
+  // impact_time + 3秒後にstandby_poseとreroad_をpublishする
+  void ImpactPointEstimator::schedule_standby_and_reroad(double delay)
+  {
+    if (delay > 0.0)
+    {
+      auto delay_ms = std::chrono::milliseconds(static_cast<int>(delay * 1000));
+      standby_timer_ = this->create_wall_timer(
+          delay_ms,
+          [this]()
+          {
+            // standby_poseのpublish
+            geometry_msgs::msg::Pose2D standby_pose;
+            standby_pose.x = standby_pose_x_;
+            standby_pose.y = standby_pose_y_;
+            standby_pose.theta = 0.0;
+            pose_publisher_->publish(standby_pose);
+            RCLCPP_INFO(this->get_logger(), "Published standby_pose: x=%.2f, y=%.2f, theta=%.2f",
+                        standby_pose.x, standby_pose.y, standby_pose.theta);
+
+            // reroad_をpublish
+            std_msgs::msg::Float64 motor_msg;
+            motor_msg.data = reroad_;
+            motor_pos_publisher_->publish(motor_msg);
+            RCLCPP_INFO(this->get_logger(), "Published reroad_: %f", reroad_);
+
+            standby_timer_->cancel();
+          });
+    }
+    else
+    {
+      geometry_msgs::msg::Pose2D standby_pose;
+      standby_pose.x = standby_pose_x_;
+      standby_pose.y = standby_pose_y_;
+      standby_pose.theta = 0.0;
+      pose_publisher_->publish(standby_pose);
+      RCLCPP_INFO(this->get_logger(), "Published standby_pose: x=%.2f, y=%.2f, theta=%.2f",
+                  standby_pose.x, standby_pose.y, standby_pose.theta);
+
+      std_msgs::msg::Float64 motor_msg;
+      motor_msg.data = reroad_;
+      motor_pos_publisher_->publish(motor_msg);
+      RCLCPP_INFO(this->get_logger(), "Published reroad_: %f", reroad_);
     }
   }
 
@@ -253,7 +276,6 @@ namespace impact_point_estimator
     {
       timer_->cancel();
     }
-    RCLCPP_INFO(this->get_logger(), "1秒間の処理停止が終了しました。");
     is_predicting_ = true;
   }
 
@@ -262,7 +284,7 @@ namespace impact_point_estimator
     auto message = std_msgs::msg::Float64();
     message.data = angle_rad;
     motor_pos_publisher_->publish(message);
-    RCLCPP_INFO(this->get_logger(), "Published angle: %f rad", angle_rad);
+    RCLCPP_INFO(this->get_logger(), "Published motor_pos_: %f rad", angle_rad);
   }
 
 } // namespace impact_point_estimator
