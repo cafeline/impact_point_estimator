@@ -33,7 +33,7 @@ namespace impact_point_estimator
     motor_pos_publisher_ = this->create_publisher<std_msgs::msg::Float64>("motor/pos", 10);
 
     points_timeout_timer_ = this->create_wall_timer(
-        100ms,
+        1000ms,
         std::bind(&ImpactPointEstimator::points_timeout_callback, this));
 
     last_point_time_ = std::chrono::steady_clock::now();
@@ -43,25 +43,28 @@ namespace impact_point_estimator
     curve_points_num_ = this->get_parameter("curve_points_num").as_int();
   }
 
-  // impact_point_estimator.cpp
 
   void ImpactPointEstimator::listener_callback(const visualization_msgs::msg::Marker::SharedPtr msg)
   {
     if (is_predicting_)
     {
-      return;
+        return;
     }
 
     geometry_msgs::msg::Point point = msg->pose.position;
+    RCLCPP_INFO(this->get_logger(), "point: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
 
     // 現在時刻を取得
     auto now = std::chrono::steady_clock::now();
 
+    // ポイントを受信した際にlast_point_time_を更新
+    last_point_time_ = now;
+
     // 初回受信時に基準時刻を設定
     if (!start_time_initialized_)
     {
-      t0_ = now;
-      start_time_initialized_ = true;
+        t0_ = now;
+        start_time_initialized_ = true;
     }
 
     // 相対時間を計算
@@ -73,34 +76,33 @@ namespace impact_point_estimator
     // 点とdtを検証・追加
     if (!validate_and_add_point(point, dt))
     {
-      return;
+        RCLCPP_WARN(this->get_logger(), "有効な点ではありません");
+        return;
     }
-
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
+      RCLCPP_INFO(this->get_logger(), "points_.size(): %zu", points_.size());
+      RCLCPP_INFO(this->get_logger(), "curve_points_num_ に達しました。process_points を呼び出します。");
       process_points();
     }
   }
 
   bool ImpactPointEstimator::validate_and_add_point(const geometry_msgs::msg::Point &point, double dt)
   {
-    double limit_z = 1.0;
+    double limit_z = 0.0;
     if (!filter_.check_point_validity(point, points_, recent_points_, limit_z, distance_threshold_))
     {
       return false;
     }
-
     points_.emplace_back(point);
-
     return true;
   }
 
-  // impact_point_estimator.cpp
 
   void ImpactPointEstimator::process_points()
   {
-    filter_.filter_points(points_, 0.5);
+    // filter_.filter_points(points_, 0.5);
 
     if (points_.size() < static_cast<size_t>(curve_points_num_))
     {
@@ -111,11 +113,11 @@ namespace impact_point_estimator
     // 時間配列の作成
     std::vector<double> times = generate_time_array();
 
-    // // timesの内容を出力
-    // for (size_t i = 0; i < times.size(); ++i)
-    // {
-    //   RCLCPP_INFO(this->get_logger(), "times[%zu]: %.6f秒", i, times[i]);
-    // }
+    // timesの内容を出力
+    for (size_t i = 0; i < times.size(); ++i)
+    {
+      RCLCPP_INFO(this->get_logger(), "times[%zu]: %.6f秒", i, times[i]);
+    }
 
     double x0, y0, z0, vx, vy, vz;
     bool success = prediction_.fit_ballistic_trajectory(points_, times, x0, y0, z0, vx, vy, vz);
@@ -198,9 +200,10 @@ namespace impact_point_estimator
 
     if (impact_time <= 0)
     {
-      RCLCPP_WARN(this->get_logger(), "impact_time: %f", impact_time);
-      return true;
-      // return false;
+      RCLCPP_WARN(this->get_logger(), "impact_time が無効です: %f", impact_time);
+      RCLCPP_WARN(this->get_logger(), "z0: %f, vz: %f", z0, vz);
+      RCLCPP_WARN(this->get_logger(), "x0: %f, y0: %f, vx: %f, vy: %f", x0, y0, vx, vy);
+      return false;
     }
 
     x_impact = x0 + vx * impact_time;
@@ -275,6 +278,7 @@ namespace impact_point_estimator
   {
     points_.clear();
     timestamps_.clear();
+    RCLCPP_INFO(this->get_logger(), "クリアしました");
   }
 
   void ImpactPointEstimator::publish_motor_pos(double angle_rad)
