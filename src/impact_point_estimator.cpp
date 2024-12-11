@@ -124,13 +124,43 @@ namespace impact_point_estimator
     std::vector<geometry_msgs::msg::Point> trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
     publish_curve_marker(trajectory_points);
 
-    // 最終着弾点を送信
-    geometry_msgs::msg::Point final_point;
-    final_point.x = x_impact;
-    final_point.y = y_impact;
-    final_point.z = 0.0;
-    publish_final_pose(final_point);
-    publish_points_marker();
+    // // 最終着弾点を送信
+    // geometry_msgs::msg::Point final_point;
+    // final_point.x = x_impact;
+    // final_point.y = y_impact;
+    // final_point.z = 0.0;
+    // publish_final_pose(final_point);
+    // publish_points_marker();
+    publish_final_pose_delayed(x_impact, y_impact, impact_time);
+  }
+
+  void ImpactPointEstimator::publish_final_pose_delayed(double x_impact, double y_impact, double delay_seconds)
+  {
+    if (delay_seconds > 0.0)
+    {
+      auto delay_ms = static_cast<int>(delay_seconds * 1000);
+      // クラスメンバとしてタイマーを作成
+      target_pose_timer_ = this->create_wall_timer(
+          std::chrono::milliseconds(delay_ms),
+          [this, x_impact, y_impact, delay_seconds]()
+          {
+            geometry_msgs::msg::Point final_point;
+            final_point.x = x_impact;
+            final_point.y = y_impact;
+            final_point.z = 0.0;
+            publish_final_pose(final_point);
+            // タイマーをキャンセルしてリソースを解放
+            target_pose_timer_->cancel();
+          });
+    }
+    else
+    {
+      geometry_msgs::msg::Point final_point;
+      final_point.x = x_impact;
+      final_point.y = y_impact;
+      final_point.z = 0.0;
+      publish_final_pose(final_point);
+    }
   }
 
   void ImpactPointEstimator::publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points)
