@@ -16,9 +16,11 @@ namespace impact_point_estimator
   {
     RCLCPP_INFO(this->get_logger(), "impact_point_estimatorの初期化");
 
-    // パラメータの宣言と取得
     this->declare_parameter<double>("distance_threshold", 1.5);
     distance_threshold_ = this->get_parameter("distance_threshold").as_double();
+    motor_pos_ = this->get_parameter("motor_pos").as_double();
+    offset_time_ = this->get_parameter("offset_time").as_double();
+    curve_points_num_ = this->get_parameter("curve_points_num").as_int();
 
     // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
@@ -35,10 +37,6 @@ namespace impact_point_estimator
         std::bind(&ImpactPointEstimator::points_timeout_callback, this));
 
     last_point_time_ = std::chrono::steady_clock::now();
-
-    motor_pos_ = this->get_parameter("motor_pos").as_double();
-    offset_time_ = this->get_parameter("offset_time").as_double();
-    curve_points_num_ = this->get_parameter("curve_points_num").as_int();
   }
 
   void ImpactPointEstimator::listener_callback(const visualization_msgs::msg::Marker::SharedPtr msg)
@@ -48,8 +46,7 @@ namespace impact_point_estimator
       RCLCPP_INFO(this->get_logger(), "is_predicting_ is false");
       return;
     }
-    RCLCPP_INFO(this->get_logger(), "points_size: %d", points_.size());
-
+    RCLCPP_INFO(this->get_logger(), "points_size: %d", (int)points_.size());
 
     geometry_msgs::msg::Point point = msg->pose.position;
     RCLCPP_INFO(this->get_logger(), "point: x=%.2f, y=%.2f, z=%.2f", point.x, point.y, point.z);
@@ -63,7 +60,7 @@ namespace impact_point_estimator
     // 初回受信時に基準時刻を設定
     if (!prediction_.is_start_time_initialized())
     {
-        prediction_.set_start_time(now);
+      prediction_.set_start_time(now);
     }
 
     // 相対時間を計算
@@ -83,25 +80,24 @@ namespace impact_point_estimator
     {
       RCLCPP_INFO(this->get_logger(), "points_.size(): %zu", points_.size());
       RCLCPP_INFO(this->get_logger(), "curve_points_num_ に達しました。process_points を呼び出します。");
-      prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result) {
+      prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result)
+                                 {
         if (result.success)
         {
           publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact,
                                    result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
           schedule_motor_position(result.impact_time + offset_time_);
         }
-        pause_processing();
-      });
-      // exit(0);
+        pause_processing(); });
       clear_data();
     }
   }
 
   void ImpactPointEstimator::points_timeout_callback()
   {
+    // 必要に応じて有効化
     // auto now = std::chrono::steady_clock::now();
     // auto duration_since_last_point = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_point_time_);
-
     // if (duration_since_last_point.count() > 500)
     // {
     //   clear_data();
@@ -112,6 +108,8 @@ namespace impact_point_estimator
   {
     points_.clear();
     prediction_.clear_timestamps();
+    // Prediction内部の開始時刻フラグをリセット
+    prediction_.reset_start_time();
     RCLCPP_INFO(this->get_logger(), "データをクリアしました");
   }
 
@@ -166,12 +164,10 @@ namespace impact_point_estimator
     points_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
     points_marker.action = visualization_msgs::msg::Marker::ADD;
 
-    // スケールの設定を修正
     points_marker.scale.x = 0.07;
     points_marker.scale.y = 0.07;
     points_marker.scale.z = 0.07;
 
-    // 色の設定を修正
     points_marker.color.r = 0.0;
     points_marker.color.g = 1.0;
     points_marker.color.b = 0.5;
@@ -192,7 +188,7 @@ namespace impact_point_estimator
     geometry_msgs::msg::Pose2D target_pose;
     target_pose.x = final_point.x;
     target_pose.y = final_point.y;
-    target_pose.theta = 0.0; // 必要に応じて設定
+    target_pose.theta = 0.0;
     pose_publisher_->publish(target_pose);
     RCLCPP_INFO(this->get_logger(), "着弾地点: x=%.2f, y=%.2f, theta=%.2f",
                 target_pose.x, target_pose.y, target_pose.theta);
@@ -216,7 +212,6 @@ namespace impact_point_estimator
   void ImpactPointEstimator::pause_processing()
   {
     is_predicting_ = false;
-
     pause_timer_ = this->create_wall_timer(
         std::chrono::seconds(1),
         std::bind(&ImpactPointEstimator::end_pause, this));
