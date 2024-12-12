@@ -34,10 +34,6 @@ namespace impact_point_estimator
     pose_publisher_ = this->create_publisher<geometry_msgs::msg::Pose2D>("/target_pose", 10);
     motor_pos_publisher_ = this->create_publisher<std_msgs::msg::Float64>("motor/pos", 10);
 
-    points_timeout_timer_ = this->create_wall_timer(
-        1000ms,
-        std::bind(&ImpactPointEstimator::points_timeout_callback, this));
-
     last_point_time_ = std::chrono::steady_clock::now();
   }
 
@@ -95,17 +91,6 @@ namespace impact_point_estimator
     }
   }
 
-  void ImpactPointEstimator::points_timeout_callback()
-  {
-    // 必要に応じて有効化
-    // auto now = std::chrono::steady_clock::now();
-    // auto duration_since_last_point = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_point_time_);
-    // if (duration_since_last_point.count() > 500)
-    // {
-    //   clear_data();
-    // }
-  }
-
   void ImpactPointEstimator::clear_data()
   {
     points_.clear();
@@ -113,7 +98,6 @@ namespace impact_point_estimator
     prediction_.timestamps_.clear();
     // Prediction内部の開始時刻フラグをリセット
     prediction_.reset_start_time();
-    RCLCPP_INFO(this->get_logger(), "データをクリアしました");
   }
 
   void ImpactPointEstimator::publish_estimated_impact(
@@ -231,14 +215,10 @@ namespace impact_point_estimator
             standby_pose.y = standby_pose_y_;
             standby_pose.theta = 0.0;
             pose_publisher_->publish(standby_pose);
-            RCLCPP_INFO(this->get_logger(), "Published standby_pose: x=%.2f, y=%.2f, theta=%.2f",
-                        standby_pose.x, standby_pose.y, standby_pose.theta);
-
             // reroad_をpublish
             std_msgs::msg::Float64 motor_msg;
             motor_msg.data = reroad_;
             motor_pos_publisher_->publish(motor_msg);
-            RCLCPP_INFO(this->get_logger(), "Published reroad_: %f", reroad_);
 
             standby_timer_->cancel();
           });
@@ -250,13 +230,10 @@ namespace impact_point_estimator
       standby_pose.y = standby_pose_y_;
       standby_pose.theta = 0.0;
       pose_publisher_->publish(standby_pose);
-      RCLCPP_INFO(this->get_logger(), "Published standby_pose: x=%.2f, y=%.2f, theta=%.2f",
-                  standby_pose.x, standby_pose.y, standby_pose.theta);
 
       std_msgs::msg::Float64 motor_msg;
       motor_msg.data = reroad_;
       motor_pos_publisher_->publish(motor_msg);
-      RCLCPP_INFO(this->get_logger(), "Published reroad_: %f", reroad_);
     }
   }
 

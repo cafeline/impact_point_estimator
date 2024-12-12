@@ -29,21 +29,15 @@ namespace impact_point_estimator
 
   private:
     void listener_callback(const visualization_msgs::msg::Marker::SharedPtr msg);
-    void points_timeout_callback();
     void end_pause();
 
     void clear_data();
 
-    void publish_estimated_impact(
-        double impact_time, double x_impact, double y_impact,
-        double x0, double y0, double z0,
-        double vx, double vy, double vz);
-    void publish_final_pose_delayed(double x_impact, double y_impact, double delay_seconds);
+    void publish_estimated_impact(double impact_time, double x_impact, double y_impact, double x0, double y0, double z0, double vx, double vy, double vz);
     void publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points);
     void publish_points_marker();
     void publish_final_pose(const geometry_msgs::msg::Point &final_point);
     void publish_motor_pos(double angle_rad);
-    void timer_callback(double x, double y); // 新規追加
     void schedule_standby_and_reroad(double delay);
 
     // タイマー制御
@@ -66,7 +60,6 @@ namespace impact_point_estimator
 
     // 時間管理
     std::chrono::steady_clock::time_point last_point_time_;
-    rclcpp::TimerBase::SharedPtr points_timeout_timer_;
     rclcpp::TimerBase::SharedPtr target_pose_timer_;
     rclcpp::TimerBase::SharedPtr standby_timer_;
     // パラメータ

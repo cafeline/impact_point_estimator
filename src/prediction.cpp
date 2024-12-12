@@ -16,8 +16,7 @@ void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &po
     return;
   }
 
-  RCLCPP_INFO(rclcpp::get_logger("Prediction"), "フィッティング結果: x0=%.6f, y0=%.6f, z0=%.6f, vx=%.6f, vy=%.6f, vz=%.6f",
-              x0, y0, z0, vx, vy, vz);
+  // RCLCPP_INFO(rclcpp::get_logger("Prediction"), "フィッティング結果: x0=%.6f, y0=%.6f, z0=%.6f, vx=%.6f, vy=%.6f, vz=%.6f", x0, y0, z0, vx, vy, vz);
 
   double impact_time, x_impact, y_impact;
   bool impact_success = calculate_impact_point(target_height, z0, vz, impact_time, x0, y0, vx, vy, x_impact, y_impact);
@@ -28,7 +27,6 @@ void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &po
     return;
   }
 
-  RCLCPP_INFO(rclcpp::get_logger("Prediction"), "着弾時間: %.2f s, 着弾地点: (%.2f, %.2f)", impact_time, x_impact, y_impact);
 
   callback({true, impact_time, x_impact, y_impact, x0, y0, z0, vx, vy, vz});
 }
@@ -117,7 +115,7 @@ double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg
   double v0 = (end_point.z - z0 + 0.5 * 9.81 * total_time * total_time) / total_time;
 
   // 計算に使用した初期値をログ出力
-  RCLCPP_INFO(rclcpp::get_logger("Prediction"), "初期位置 z0=%.2f m, 初期速度 v0=%.2f m/s, duration=%.2f s", z0, v0, duration.count());
+  // RCLCPP_INFO(rclcpp::get_logger("Prediction"), "初期位置 z0=%.2f m, 初期速度 v0=%.2f m/s, duration=%.2f s", z0, v0, duration.count());
 
   // 二次方程式の係数を設定
   // z = z0 + v0*t - (1/2)*g*t^2 から
@@ -443,7 +441,6 @@ void Prediction::set_start_time(std::chrono::steady_clock::time_point start_time
 {
   start_time_ = start_time;
   start_time_initialized_ = true;
-  RCLCPP_INFO(rclcpp::get_logger("Prediction"), "開始時刻を設定しました。");
 }
 
 bool Prediction::is_start_time_initialized() const

@@ -5,7 +5,6 @@ bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::v
 {
   if (point.z < limit_z)
   {
-    RCLCPP_WARN(rclcpp::get_logger("Filter"), "point.z: %f", point.z);
     return false;
   }
 
@@ -21,8 +20,6 @@ bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::v
   {
     if (recent_points[i].x > recent_points[i - 1].x + 0.05)
     {
-      RCLCPP_WARN(rclcpp::get_logger("Filter"), "recent_points[i].x: %f", recent_points[i].x);
-      RCLCPP_WARN(rclcpp::get_logger("Filter"), "recent_points[i - 1].x: %f", recent_points[i - 1].x);
       return false;
     }
   }
