@@ -1,9 +1,11 @@
 #include "impact_point_estimator/filter.hpp"
+#include <rclcpp/rclcpp.hpp>
 
-bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::vector<geometry_msgs::msg::Point> &points, std::deque<geometry_msgs::msg::Point> &recent_points, double limit_z, double distance_threshold)
+bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::vector<geometry_msgs::msg::Point> &points, std::deque<geometry_msgs::msg::Point> &recent_points, double limit_z)
 {
   if (point.z < limit_z)
   {
+    RCLCPP_WARN(rclcpp::get_logger("Filter"), "point.z: %f", point.z);
     return false;
   }
 
@@ -17,21 +19,23 @@ bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::v
   // x座標が減少しているか確認
   for (size_t i = 1; i < recent_points.size(); ++i)
   {
-    if (recent_points[i].x > recent_points[i - 1].x)
+    if (recent_points[i].x > recent_points[i - 1].x + 0.05)
     {
+      RCLCPP_WARN(rclcpp::get_logger("Filter"), "recent_points[i].x: %f", recent_points[i].x);
+      RCLCPP_WARN(rclcpp::get_logger("Filter"), "recent_points[i - 1].x: %f", recent_points[i - 1].x);
       return false;
     }
   }
 
   // 前の点との距離をチェック
-  // if (!points.empty())
-  // {
-  //   double distance = calculate_distance(point, points.back());
-  //   if (distance >= distance_threshold)
-  //   {
-  //     return false;
-  //   }
-  // }
+  if (!points.empty())
+  {
+    double distance = calculate_distance(point, points.back());
+    if (distance >= 0.7)
+    {
+      return false;
+    }
+  }
 
   return true;
 }

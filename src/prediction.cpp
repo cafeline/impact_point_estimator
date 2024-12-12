@@ -4,7 +4,7 @@
 #include <random>
 #include <algorithm>
 
-void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &points, size_t curve_points_num, std::function<void(const PredictionResult &)> callback)
+void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &points, double target_height, std::function<void(const PredictionResult &)> callback)
 {
   // 物理モデルによる弾道軌道フィッティング
   double x0, y0, z0, vx, vy, vz;
@@ -20,7 +20,7 @@ void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &po
               x0, y0, z0, vx, vy, vz);
 
   double impact_time, x_impact, y_impact;
-  bool impact_success = calculate_impact_point(z0, vz, impact_time, x0, y0, vx, vy, x_impact, y_impact);
+  bool impact_success = calculate_impact_point(target_height, z0, vz, impact_time, x0, y0, vx, vy, x_impact, y_impact);
   if (!impact_success)
   {
     RCLCPP_WARN(rclcpp::get_logger("Prediction"), "有効な着弾時間または地点が見つかりませんでした。");
@@ -183,13 +183,7 @@ std::tuple<double, double, double> Prediction::calculate_centroid(const std::vec
   return {sum_x / n, sum_y / n, sum_z / n};
 }
 
-std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve_ransac(
-    const std::vector<geometry_msgs::msg::Point> &points,
-    Eigen::VectorXd &coeffs_x,
-    Eigen::VectorXd &coeffs_y,
-    Eigen::VectorXd &coeffs_z,
-    double threshold,
-    int max_iterations)
+std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve_ransac(const std::vector<geometry_msgs::msg::Point> &points, Eigen::VectorXd &coeffs_x, Eigen::VectorXd &coeffs_y, Eigen::VectorXd &coeffs_z, double threshold, int max_iterations)
 {
   size_t n = points.size();
   if (n < 4)
@@ -314,13 +308,8 @@ std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve_ransac(
   return {};
 }
 
-bool Prediction::fit_ballistic_trajectory(
-    const std::vector<geometry_msgs::msg::Point> &points,
-    const std::vector<double> &times,
-    double &x0, double &y0, double &z0,
-    double &vx, double &vy, double &vz)
+bool Prediction::fit_ballistic_trajectory(const std::vector<geometry_msgs::msg::Point> &points, const std::vector<double> &times, double &x0, double &y0, double &z0, double &vx, double &vy, double &vz)
 {
-  // points.size() == times.size()が前提
   if (points.size() < 4)
   {
     RCLCPP_WARN(rclcpp::get_logger("Prediction"), "フィッティングに必要な点が不足しています");
@@ -387,11 +376,7 @@ bool Prediction::fit_ballistic_trajectory(
   return true;
 }
 
-bool Prediction::calculate_impact_point(
-    double z0, double vz,
-    double &impact_time,
-    double x0, double y0, double vx, double vy,
-    double &x_impact, double &y_impact)
+bool Prediction::calculate_impact_point(double target_height, double z0, double vz, double &impact_time, double x0, double y0, double vx, double vy, double &x_impact, double &y_impact)
 {
   // z(t) = z0 + vz * t - 0.5 * g * t^2
   // 着地時点では z(t) = 0
@@ -472,16 +457,7 @@ void Prediction::add_timestamp(double dt)
   RCLCPP_DEBUG(rclcpp::get_logger("Prediction"), "タイムスタンプを追加しました: %.6f 秒", dt);
 }
 
-void Prediction::clear_timestamps()
-{
-  timestamps_.clear();
-  RCLCPP_INFO(rclcpp::get_logger("Prediction"), "タイムスタンプをクリアしました。");
-}
-
-std::vector<geometry_msgs::msg::Point> Prediction::generate_trajectory_points(
-    double x0, double y0, double z0,
-    double vx, double vy, double vz,
-    double impact_time)
+std::vector<geometry_msgs::msg::Point> Prediction::generate_trajectory_points(double x0, double y0, double z0, double vx, double vy, double vz, double impact_time)
 {
   std::vector<geometry_msgs::msg::Point> trajectory;
   double g = 9.81;        // 重力加速度 (m/s^2)

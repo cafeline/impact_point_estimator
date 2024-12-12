@@ -16,14 +16,13 @@ namespace impact_point_estimator
   {
     RCLCPP_INFO(this->get_logger(), "impact_point_estimatorの初期化");
 
-    distance_threshold_ = this->get_parameter("distance_threshold").as_double();
     motor_pos_ = this->get_parameter("motor_pos").as_double();
     offset_time_ = this->get_parameter("offset_time").as_double();
     curve_points_num_ = this->get_parameter("curve_points_num").as_int();
     standby_pose_x_ = this->get_parameter("standby_pose_x").as_double();
     standby_pose_y_ = this->get_parameter("standby_pose_y").as_double();
     reroad_ = this->get_parameter("reroad").as_double();
-    target_height_ = this->get_parameter("target_height").as_double(); // 取得
+    target_height_ = this->get_parameter("target_height").as_double();
 
     // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
@@ -50,37 +49,34 @@ namespace impact_point_estimator
     }
 
     geometry_msgs::msg::Point point = msg->pose.position;
-
     // 現在時刻を取得
     auto now = std::chrono::steady_clock::now();
-
-    // ポイントを受信した際にlast_point_time_を更新
+    double dt = std::chrono::duration<double>(now - last_point_time_).count();
     last_point_time_ = now;
-
-    // 初回受信時に基準時刻を設定
     if (!prediction_.is_start_time_initialized())
     {
       prediction_.set_start_time(now);
     }
 
     // 相対時間を計算
-    double dt = prediction_.calculate_relative_time(now);
+    double time_stamp = prediction_.calculate_relative_time(now);
 
-    // ポイントとdtを検証・追加
-    if (!filter_.check_point_validity(point, points_, recent_points_, 0.0, distance_threshold_))
+    if (dt > 0.3)
     {
-      RCLCPP_WARN(this->get_logger(), "有効な点ではありません");
+      clear_data();
       return;
     }
-
+    // ポイントとdtを検証・追加
+    if (!filter_.check_point_validity(point, points_, recent_points_, target_height_))
+    {
+      return;
+    }
     points_.emplace_back(point);
-    prediction_.add_timestamp(dt);
+    prediction_.add_timestamp(time_stamp);
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
-      RCLCPP_INFO(this->get_logger(), "curve_points_num_ に達しました。process_points を呼び出します。");
-      prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result)
-                                 {
+      prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result) {
         if (result.success)
         {
           // 予測が成功したらすぐに着弾地点をpublish
@@ -92,6 +88,7 @@ namespace impact_point_estimator
           // impact_time + 3秒後に standby_pose と reroad_ をpublish
           double standby_delay = result.impact_time + offset_time_ + 3.0;
           schedule_standby_and_reroad(standby_delay);
+          publish_points_marker();
         }
         pause_processing(); });
       clear_data();
@@ -112,7 +109,8 @@ namespace impact_point_estimator
   void ImpactPointEstimator::clear_data()
   {
     points_.clear();
-    prediction_.clear_timestamps();
+    recent_points_.clear();
+    prediction_.timestamps_.clear();
     // Prediction内部の開始時刻フラグをリセット
     prediction_.reset_start_time();
     RCLCPP_INFO(this->get_logger(), "データをクリアしました");
@@ -133,7 +131,7 @@ namespace impact_point_estimator
     geometry_msgs::msg::Point final_point;
     final_point.x = x_impact;
     final_point.y = y_impact;
-    final_point.z = target_height_; // YAMLから読み込んだ高さをセット(ログ用)
+    final_point.z = target_height_;
     publish_final_pose(final_point);
   }
 
@@ -194,7 +192,7 @@ namespace impact_point_estimator
     target_pose.y = final_point.y;
     target_pose.theta = 0.0;
     pose_publisher_->publish(target_pose);
-    RCLCPP_INFO(this->get_logger(), "Immediately Published target_pose: x=%.2f, y=%.2f (height=%.2f), theta=%.2f",
+    RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f (height=%.2f), theta=%.2f",
                 target_pose.x, target_pose.y, final_point.z, target_pose.theta);
   }
 

@@ -59,7 +59,6 @@ namespace impact_point_estimator
     rclcpp::TimerBase::SharedPtr pause_timer_;
 
     // 状態管理
-    double distance_threshold_;
     bool is_predicting_;
     std::vector<geometry_msgs::msg::Point> points_;
     bool has_previous_point_ = false;
