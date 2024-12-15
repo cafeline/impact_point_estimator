@@ -50,7 +50,7 @@ namespace impact_point_estimator
     // 現在時刻を取得
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_point_time_).count();
-    last_point_time_ = now;
+
     if (!prediction_.is_start_time_initialized())
     {
       prediction_.set_start_time(now);
@@ -62,8 +62,17 @@ namespace impact_point_estimator
     if (dt > 0.2)
     {
       clear_data();
+      last_point_time_ = now;
+      if (filter_.check_point_validity(point, points_, recent_points_, target_height_))
+      {
+        points_.emplace_back(point);
+        prediction_.add_timestamp(time_stamp);
+      }
       return;
     }
+
+    last_point_time_ = now;
+
     // ポイントとdtを検証・追加
     if (!filter_.check_point_validity(point, points_, recent_points_, target_height_))
     {
