@@ -57,7 +57,7 @@ namespace impact_point_estimator
     // 相対時間を計算
     double time_stamp = prediction_.calculate_relative_time(now);
 
-    if (dt > 0.3)
+    if (dt > 0.15)
     {
       clear_data();
       return;
@@ -76,8 +76,7 @@ namespace impact_point_estimator
         if (result.success)
         {
           // 予測が成功したらすぐに着弾地点をpublish
-          publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact,
-                                   result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
+          publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact, result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
           // impact_time 後に motor_pos_ をパブリッシュ
           schedule_motor_position(result.impact_time + offset_time_);
 
@@ -86,7 +85,8 @@ namespace impact_point_estimator
           schedule_standby_and_reroad(standby_delay);
           publish_points_marker();
         }
-        pause_processing(); });
+        pause_processing();
+      });
       clear_data();
     }
   }

@@ -18,7 +18,7 @@ bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::v
   // x座標が減少しているか確認
   for (size_t i = 1; i < recent_points.size(); ++i)
   {
-    if (recent_points[i].x > recent_points[i - 1].x + 0.05)
+    if (recent_points[i].x > recent_points[i - 1].x)
     {
       return false;
     }
@@ -28,7 +28,7 @@ bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::v
   if (!points.empty())
   {
     double distance = calculate_distance(point, points.back());
-    if (distance >= 0.7)
+    if (distance > 1.0 || distance < 0.2)
     {
       return false;
     }
