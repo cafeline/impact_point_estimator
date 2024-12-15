@@ -57,7 +57,7 @@ namespace impact_point_estimator
     // 相対時間を計算
     double time_stamp = prediction_.calculate_relative_time(now);
 
-    if (dt > 0.15)
+    if (dt > 0.3)
     {
       clear_data();
       return;

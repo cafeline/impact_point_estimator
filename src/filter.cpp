@@ -24,15 +24,16 @@ bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::v
     }
   }
 
-  // 前の点との距離をチェック
-  if (!points.empty())
-  {
-    double distance = calculate_distance(point, points.back());
-    if (distance > 1.0 || distance < 0.2)
-    {
-      return false;
-    }
-  }
+  // // 前の点との距離をチェック
+  // if (!points.empty())
+  // {
+  //   double distance = calculate_distance(point, points.back());
+  //   // if (distance > 1.0 || distance < 0.2)
+  //   if (distance > 1.0)
+  //   {
+  //     return false;
+  //   }
+  // }
 
   return true;
 }
