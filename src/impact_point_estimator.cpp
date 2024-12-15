@@ -23,6 +23,8 @@ namespace impact_point_estimator
     standby_pose_y_ = this->get_parameter("standby_pose_y").as_double();
     reroad_ = this->get_parameter("reroad").as_double();
     target_height_ = this->get_parameter("target_height").as_double();
+    two_points_diff_x_ = this->get_parameter("two_points_diff_x").as_double();
+    two_points_diff_y_ = this->get_parameter("two_points_diff_y").as_double();
 
     // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
@@ -57,7 +59,7 @@ namespace impact_point_estimator
     // 相対時間を計算
     double time_stamp = prediction_.calculate_relative_time(now);
 
-    if (dt > 0.3)
+    if (dt > 0.2)
     {
       clear_data();
       return;
@@ -70,9 +72,26 @@ namespace impact_point_estimator
     points_.emplace_back(point);
     prediction_.add_timestamp(time_stamp);
 
+    if (points_.size() == 2)
+    {
+      double diff_x = points_[1].x - points_[0].x;
+      double diff_y = points_[1].y - points_[0].y;
+      RCLCPP_INFO(this->get_logger(), "diff_x: %.2f, diff_y: %.2f", diff_x, diff_y);
+      if (diff_x > two_points_diff_x_ || abs(diff_y) > two_points_diff_y_)
+      {
+        clear_data();
+        return;
+      }
+      process_two_points(points_);
+      // 3秒後に standby_pose と reroad_ をpublish
+      double standby_delay = 3.0;
+      schedule_standby_and_reroad(standby_delay);
+    }
+
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
-      prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result) {
+      prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result)
+                                 {
         if (result.success)
         {
           // 予測が成功したらすぐに着弾地点をpublish
@@ -80,14 +99,47 @@ namespace impact_point_estimator
           // impact_time 後に motor_pos_ をパブリッシュ
           schedule_motor_position(result.impact_time + offset_time_);
 
-          // impact_time + 3秒後に standby_pose と reroad_ をpublish
-          double standby_delay = result.impact_time + offset_time_ + 3.0;
-          schedule_standby_and_reroad(standby_delay);
           publish_points_marker();
         }
-        pause_processing();
-      });
+        pause_processing(); });
       clear_data();
+    }
+  }
+
+  void ImpactPointEstimator::process_two_points(const std::vector<geometry_msgs::msg::Point> &points)
+  {
+    double x1 = points[0].x;
+    double y1 = points[0].y;
+    double x2 = points[1].x;
+    double y2 = points[1].y;
+    double target_x = -1.5;
+    double target_y;
+
+    if (x2 - x1 != 0)
+    {
+      double slope = (y2 - y1) / (x2 - x1);
+      target_y = y1 + slope * (target_x - x1);
+
+      // 目標姿勢を作成してパブリッシュ
+      geometry_msgs::msg::Pose2D target_pose;
+      target_pose.x = target_x;
+      target_pose.y = target_y;
+      target_pose.theta = 0.0;
+      pose_publisher_->publish(target_pose);
+      RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f", target_x, target_y);
+
+      // ボールマーカーをパブリッシュ
+      publish_two_ball_marker(points[0], points[1]);
+
+      // 2点間を線で結ぶ軌道を作成してパブリッシュ
+      std::vector<geometry_msgs::msg::Point> trajectory_points;
+      trajectory_points.emplace_back(points[0]);
+      trajectory_points.emplace_back(points[1]);
+      publish_linear_trajectory_marker(trajectory_points);
+    }
+    else
+    {
+      RCLCPP_WARN(this->get_logger(), "入力された2点が垂直です。目標位置を計算できません。");
     }
   }
 
@@ -260,6 +312,56 @@ namespace impact_point_estimator
     message.data = angle_rad;
     motor_pos_publisher_->publish(message);
     RCLCPP_INFO(this->get_logger(), "Published motor_pos_: %f rad", angle_rad);
+  }
+
+  void ImpactPointEstimator::publish_two_ball_marker(const geometry_msgs::msg::Point &point1, const geometry_msgs::msg::Point &point2)
+  {
+    visualization_msgs::msg::Marker ball_marker;
+    ball_marker.header.frame_id = "map";
+    ball_marker.header.stamp = this->get_clock()->now();
+    ball_marker.ns = "ball_markers";
+    ball_marker.id = 0;
+    ball_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+    ball_marker.action = visualization_msgs::msg::Marker::ADD;
+
+    // ボールのサイズを設定
+    ball_marker.scale.x = 0.1;
+    ball_marker.scale.y = 0.1;
+    ball_marker.scale.z = 0.1;
+
+    // ボールの色を設定（黄色）
+    ball_marker.color.r = 1.0;
+    ball_marker.color.g = 1.0;
+    ball_marker.color.b = 0.0;
+    ball_marker.color.a = 1.0;
+
+    // ボールの位置を追加
+    ball_marker.points.emplace_back(point1);
+    ball_marker.points.emplace_back(point2);
+
+    // マーカーをパブリッシュ
+    publisher_->publish(ball_marker);
+  }
+
+  void ImpactPointEstimator::publish_linear_trajectory_marker(const std::vector<geometry_msgs::msg::Point> &trajectory_points)
+  {
+    visualization_msgs::msg::Marker trajectory_marker;
+    trajectory_marker.header.frame_id = "map";
+    trajectory_marker.header.stamp = this->get_clock()->now();
+    trajectory_marker.ns = "linear_trajectory";
+    trajectory_marker.id = 1;
+    trajectory_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    trajectory_marker.action = visualization_msgs::msg::Marker::ADD;
+    trajectory_marker.scale.x = 0.05; // 線の太さ
+
+    // 色の設定（青色）
+    trajectory_marker.color.r = 0.0;
+    trajectory_marker.color.g = 0.0;
+    trajectory_marker.color.b = 1.0;
+    trajectory_marker.color.a = 1.0;
+
+    trajectory_marker.points = trajectory_points;
+    publisher_->publish(trajectory_marker);
   }
 
 } // namespace impact_point_estimator

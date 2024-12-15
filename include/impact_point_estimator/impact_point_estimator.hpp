@@ -43,6 +43,9 @@ namespace impact_point_estimator
     // タイマー制御
     void schedule_motor_position(double delay);
     void pause_processing();
+    void process_two_points(const std::vector<geometry_msgs::msg::Point> &points);
+    void publish_two_ball_marker(const geometry_msgs::msg::Point &point1, const geometry_msgs::msg::Point &point2);
+    void publish_linear_trajectory_marker(const std::vector<geometry_msgs::msg::Point> &trajectory_points);
 
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr subscription_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_;
@@ -70,6 +73,8 @@ namespace impact_point_estimator
     double standby_pose_y_;
     double reroad_;
     double target_height_;
+    double two_points_diff_x_;
+    double two_points_diff_y_;
 
     Filter filter_;
     Prediction prediction_;
