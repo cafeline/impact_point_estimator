@@ -4,7 +4,7 @@
 #include <random>
 #include <algorithm>
 
-void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &points, double target_height, std::function<void(const PredictionResult &)> callback)
+void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &points, double lidar_to_target_x, double lidar_to_target_y, double lidar_to_target_z, std::function<void(const PredictionResult &)> callback)
 {
   // 物理モデルによる弾道軌道フィッティング
   double x0, y0, z0, vx, vy, vz;
@@ -19,14 +19,13 @@ void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &po
   // RCLCPP_INFO(rclcpp::get_logger("Prediction"), "フィッティング結果: x0=%.6f, y0=%.6f, z0=%.6f, vx=%.6f, vy=%.6f, vz=%.6f", x0, y0, z0, vx, vy, vz);
 
   double impact_time, x_impact, y_impact;
-  bool impact_success = calculate_impact_point(target_height, z0, vz, impact_time, x0, y0, vx, vy, x_impact, y_impact);
+  bool impact_success = calculate_impact_point(lidar_to_target_x, lidar_to_target_y, lidar_to_target_z, z0, vz, impact_time, x0, y0, vx, vy, x_impact, y_impact);
   if (!impact_success)
   {
     RCLCPP_WARN(rclcpp::get_logger("Prediction"), "有効な着弾時間または地点が見つかりませんでした。");
     callback({false, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
     return;
   }
-
 
   callback({true, impact_time, x_impact, y_impact, x0, y0, z0, vx, vy, vz});
 }
@@ -89,7 +88,7 @@ std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve(const std::ve
   return curve_points;
 }
 
-double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg::Point> &points, std::chrono::steady_clock::time_point start_time, std::chrono::steady_clock::time_point end_time, double target_height)
+double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg::Point> &points, std::chrono::steady_clock::time_point start_time, std::chrono::steady_clock::time_point end_time, double lidar_to_target_z)
 {
   // 点が2つ未満の場合は計算不可能
   if (points.size() < 2)
@@ -120,9 +119,9 @@ double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg
   // 二次方程式の係数を設定
   // z = z0 + v0*t - (1/2)*g*t^2 から
   // (1/2)*g*t^2 - v0*t + (z0 - z_target) = 0 の形に変形
-  double a = 0.5 * 9.81;         // 重力加速度の1/2
-  double b = -v0;                // 初期速度の負値
-  double c = z0 - target_height; // 初期高さと目標高さの差
+  double a = 0.5 * 9.81;             // 重力加速度の1/2
+  double b = -v0;                    // 初期速度の負値
+  double c = z0 - lidar_to_target_z; // 初期高さと目標高さの差
 
   // 判別式の計算 (b^2 - 4ac)
   double discriminant = b * b - 4 * a * c;
@@ -374,55 +373,55 @@ bool Prediction::fit_ballistic_trajectory(const std::vector<geometry_msgs::msg::
   return true;
 }
 
-bool Prediction::calculate_impact_point(double target_height, double z0, double vz, double &impact_time, double x0, double y0, double vx, double vy, double &x_impact, double &y_impact)
+bool Prediction::calculate_impact_point(double lidar_to_target_x, double lidar_to_target_y, double lidar_to_target_z, double z0, double vz, double &impact_time, double x0, double y0, double vx, double vy, double &x_impact, double &y_impact)
 {
   // z(t) = z0 + vz * t - 0.5 * g * t^2
-  // 着地時点では z(t) = 0
-  // 0 = z0 + vz * t - 0.5 * g * t^2
-  // => 0.5 * g * t^2 - vz * t - z0 = 0
+    // 着地時点では z(t) = lidar_to_target_z
+    // => 0.5 * g * t^2 - vz * t + (z0 - lidar_to_target_z) = 0
 
-  double a = 0.5 * 9.81;
-  double b = -vz;
-  double c = -z0;
+    double a = 0.5 * 9.81;
+    double b = -vz;
+    double c = - z0 + lidar_to_target_z;
 
-  double discriminant = b * b - 4 * a * c;
+    double discriminant = b * b - 4 * a * c;
 
-  if (discriminant < 0)
-  {
-    RCLCPP_WARN(rclcpp::get_logger("Prediction"), "着地時間の計算に失敗しました（判別式が負）。");
-    return false;
-  }
+    if (discriminant < 0)
+    {
+        RCLCPP_WARN(rclcpp::get_logger("Prediction"), "着地時間の計算に失敗しました（判別式が負）。");
+        return false;
+    }
 
-  double sqrt_discriminant = std::sqrt(discriminant);
-  double t1 = (-b + sqrt_discriminant) / (2 * a);
-  double t2 = (-b - sqrt_discriminant) / (2 * a);
+    double sqrt_discriminant = std::sqrt(discriminant);
+    double t1 = (-b + sqrt_discriminant) / (2 * a);
+    double t2 = (-b - sqrt_discriminant) / (2 * a);
 
-  // 正の解を選択
-  if (t1 >= 0 && t2 >= 0)
-  {
-    impact_time = std::min(t1, t2);
-  }
-  else if (t1 >= 0)
-  {
-    impact_time = t1;
-  }
-  else if (t2 >= 0)
-  {
-    impact_time = t2;
-  }
-  else
-  {
-    RCLCPP_WARN(rclcpp::get_logger("Prediction"), "有効な着地時間が見つかりませんでした。");
-    return false;
-  }
+    // 正の解を選択
+    if (t1 >= 0 && t2 >= 0)
+    {
+        impact_time = std::min(t1, t2);
+    }
+    else if (t1 >= 0)
+    {
+        impact_time = t1;
+    }
+    else if (t2 >= 0)
+    {
+        impact_time = t2;
+    }
+    else
+    {
+        RCLCPP_WARN(rclcpp::get_logger("Prediction"), "有効な着地時間が見つかりませんでした。");
+        return false;
+    }
 
-  // 着地時点のx, y座標を計算
-  x_impact = x0 + vx * impact_time;
-  y_impact = y0 + vy * impact_time;
+    // 着地時点のx, y座標を計算
+    x_impact = x0 + vx * impact_time + lidar_to_target_x;
+    y_impact = y0 + vy * impact_time + lidar_to_target_y;
 
-  // RCLCPP_INFO(rclcpp::get_logger("Prediction"), "着地時間: %.2f s, 着地地点: (%.2f, %.2f)", impact_time, x_impact, y_impact);
+    // ログ出力
+    RCLCPP_INFO(rclcpp::get_logger("Prediction"), "着地時間: %.2f s, 着地地点: (%.2f, %.2f)", impact_time, x_impact, y_impact);
 
-  return true;
+    return true;
 }
 
 double Prediction::calculate_relative_time(std::chrono::steady_clock::time_point current_time)

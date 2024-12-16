@@ -72,7 +72,9 @@ namespace impact_point_estimator
     double standby_pose_x_;
     double standby_pose_y_;
     double reroad_;
-    double target_height_;
+    double lidar_to_target_x_;
+    double lidar_to_target_y_;
+    double lidar_to_target_z_;
     double two_points_diff_x_;
     double two_points_diff_y_;
 

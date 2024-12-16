@@ -22,7 +22,9 @@ namespace impact_point_estimator
     standby_pose_x_ = this->get_parameter("standby_pose_x").as_double();
     standby_pose_y_ = this->get_parameter("standby_pose_y").as_double();
     reroad_ = this->get_parameter("reroad").as_double();
-    target_height_ = this->get_parameter("target_height").as_double();
+    lidar_to_target_x_ = this->get_parameter("lidar_to_target_x").as_double();
+    lidar_to_target_y_ = this->get_parameter("lidar_to_target_y").as_double();
+    lidar_to_target_z_ = this->get_parameter("lidar_to_target_z").as_double();
     two_points_diff_x_ = this->get_parameter("two_points_diff_x").as_double();
     two_points_diff_y_ = this->get_parameter("two_points_diff_y").as_double();
 
@@ -58,12 +60,13 @@ namespace impact_point_estimator
 
     // 相対時間を計算
     double time_stamp = prediction_.calculate_relative_time(now);
+    // RCLCPP_INFO(this->get_logger(), "dt: %.2f", dt);
 
-    if (dt > 0.2)
+    if (dt > 0.15)
     {
       clear_data();
       last_point_time_ = now;
-      if (filter_.check_point_validity(point, points_, recent_points_, target_height_))
+      if (filter_.check_point_validity(point, points_, recent_points_, lidar_to_target_z_))
       {
         points_.emplace_back(point);
         prediction_.add_timestamp(time_stamp);
@@ -74,7 +77,7 @@ namespace impact_point_estimator
     last_point_time_ = now;
 
     // ポイントとdtを検証・追加
-    if (!filter_.check_point_validity(point, points_, recent_points_, target_height_))
+    if (!filter_.check_point_validity(point, points_, recent_points_, lidar_to_target_z_))
     {
       return;
     }
@@ -85,8 +88,8 @@ namespace impact_point_estimator
     {
       double diff_x = points_[1].x - points_[0].x;
       double diff_y = points_[1].y - points_[0].y;
-      RCLCPP_INFO(this->get_logger(), "diff_x: %.2f, diff_y: %.2f", diff_x, diff_y);
-      if (diff_x > two_points_diff_x_ || abs(diff_y) > two_points_diff_y_)
+      double diff_z = points_[1].z - points_[0].z;
+      if (diff_x > two_points_diff_x_ || abs(diff_y) > two_points_diff_y_ || diff_z < 0)
       {
         clear_data();
         return;
@@ -99,7 +102,7 @@ namespace impact_point_estimator
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
-      prediction_.process_points(points_, points_.size(), [this](const PredictionResult &result)
+      prediction_.process_points(points_, lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_, [this](const PredictionResult &result)
                                  {
         if (result.success)
         {
@@ -166,7 +169,7 @@ namespace impact_point_estimator
       double x0, double y0, double z0,
       double vx, double vy, double vz)
   {
-    RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.2f, %.2f), height=%.2f", impact_time, x_impact, y_impact, target_height_);
+    RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.2f, %.2f), height=%.2f", impact_time, x_impact, y_impact, lidar_to_target_z_);
 
     // 可視化用に軌道をプロット
     std::vector<geometry_msgs::msg::Point> trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
@@ -176,7 +179,7 @@ namespace impact_point_estimator
     geometry_msgs::msg::Point final_point;
     final_point.x = x_impact;
     final_point.y = y_impact;
-    final_point.z = target_height_;
+    final_point.z = lidar_to_target_z_;
     publish_final_pose(final_point);
   }
 
