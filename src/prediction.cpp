@@ -418,9 +418,6 @@ bool Prediction::calculate_impact_point(double lidar_to_target_x, double lidar_t
     x_impact = x0 + vx * impact_time + lidar_to_target_x;
     y_impact = y0 + vy * impact_time + lidar_to_target_y;
 
-    // ログ出力
-    RCLCPP_INFO(rclcpp::get_logger("Prediction"), "着地時間: %.2f s, 着地地点: (%.2f, %.2f)", impact_time, x_impact, y_impact);
-
     return true;
 }
 
@@ -450,7 +447,6 @@ bool Prediction::is_start_time_initialized() const
 void Prediction::add_timestamp(double dt)
 {
   timestamps_.emplace_back(dt);
-  RCLCPP_DEBUG(rclcpp::get_logger("Prediction"), "タイムスタンプを追加しました: %.6f 秒", dt);
 }
 
 std::vector<geometry_msgs::msg::Point> Prediction::generate_trajectory_points(double x0, double y0, double z0, double vx, double vy, double vz, double impact_time)

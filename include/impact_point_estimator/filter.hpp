@@ -9,7 +9,7 @@ class Filter
 {
 public:
   Filter(double V_min, double V_max, const std::vector<double> &direction_vector, double theta_max_deg);
-  bool validate_vel_and_direction(const geometry_msgs::msg::Point &p1, const geometry_msgs::msg::Point &p2, double delta_t);
+  bool validate_vel_and_direction(const geometry_msgs::msg::Point &p1, const geometry_msgs::msg::Point &p2, double dt);
   geometry_msgs::msg::Vector3 get_velocity() const;
 
   bool check_point_validity(const geometry_msgs::msg::Point &point, std::vector<geometry_msgs::msg::Point> &points, std::deque<geometry_msgs::msg::Point> &recent_points, double limit_z);

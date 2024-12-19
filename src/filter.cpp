@@ -18,12 +18,12 @@ Filter::Filter(double V_min, double V_max, const std::vector<double> &direction_
 }
 
 // 2点間から速度ベクトルと速度の大きさを計算
-bool Filter::validate_vel_and_direction(const geometry_msgs::msg::Point &p1, const geometry_msgs::msg::Point &p2, double delta_t)
+bool Filter::validate_vel_and_direction(const geometry_msgs::msg::Point &p1, const geometry_msgs::msg::Point &p2, double dt)
 {
   // 速度ベクトルの計算
-  velocity_.x = (p2.x - p1.x) / delta_t;
-  velocity_.y = (p2.y - p1.y) / delta_t;
-  velocity_.z = (p2.z - p1.z) / delta_t;
+  velocity_.x = (p2.x - p1.x) / dt;
+  velocity_.y = (p2.y - p1.y) / dt;
+  velocity_.z = (p2.z - p1.z) / dt;
 
   // 速度の大きさ
   double speed = std::sqrt(velocity_.x * velocity_.x + velocity_.y * velocity_.y + velocity_.z * velocity_.z);
@@ -94,7 +94,7 @@ bool Filter::check_point_validity(const geometry_msgs::msg::Point &point, std::v
   if (!points.empty())
   {
     double distance = calculate_distance(point, points.back());
-    RCLCPP_INFO(rclcpp::get_logger("filter"), "distance: %.2f", distance);
+    // RCLCPP_INFO(rclcpp::get_logger("filter"), "distance: %.2f", distance);
     // if (distance > 1.0 || distance < 0.2)
     if (distance < 0.1)
     {

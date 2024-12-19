@@ -25,13 +25,11 @@ namespace impact_point_estimator
     lidar_to_target_x_ = this->get_parameter("lidar_to_target_x").as_double();
     lidar_to_target_y_ = this->get_parameter("lidar_to_target_y").as_double();
     lidar_to_target_z_ = this->get_parameter("lidar_to_target_z").as_double();
-    two_points_diff_x_ = this->get_parameter("two_points_diff_x").as_double();
-    two_points_diff_y_ = this->get_parameter("two_points_diff_y").as_double();
     V_min_ = this->get_parameter("V_min").as_double();
     V_max_ = this->get_parameter("V_max").as_double();
     expected_direction_ = this->get_parameter("expected_direction").as_double_array();
     theta_max_deg_ = this->get_parameter("theta_max_deg").as_double();
-
+    first_goal_x_ = this->get_parameter("first_goal_x").as_double();
     // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
         "tennis_ball", 10, std::bind(&ImpactPointEstimator::listener_callback, this, std::placeholders::_1));
@@ -59,7 +57,7 @@ namespace impact_point_estimator
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_point_time_).count();
 
-    RCLCPP_INFO(this->get_logger(), "dt %f, point x: %.2f, y: %.2f, z: %.2f", dt, point.x, point.y, point.z);
+    // RCLCPP_INFO(this->get_logger(), "dt %f, point x: %.2f, y: %.2f, z: %.2f", dt, point.x, point.y, point.z);
     if (!prediction_.is_start_time_initialized())
     {
       prediction_.set_start_time(now);
@@ -71,19 +69,19 @@ namespace impact_point_estimator
 
     if (dt > 0.35)
     {
-      RCLCPP_WARN(this->get_logger(), "dt > 0.15 :clear_data");
+      RCLCPP_WARN(this->get_logger(), "dt = %.2f > 0.35 :clear_data", dt);
       clear_data();
       last_point_time_ = now;
-      if (filter_.check_point_validity(point, points_, recent_points_, lidar_to_target_z_))
+      if (point.z > lidar_to_target_z_)
       {
-        RCLCPP_WARN(this->get_logger(), "dt > 0.15 :point valid");
         points_.emplace_back(point);
+        time_stamp = -0.1;
         prediction_.add_timestamp(time_stamp);
       }
       return;
     }
 
-    RCLCPP_INFO(this->get_logger(), "points_size: %d", points_.size());
+    // RCLCPP_INFO(this->get_logger(), "points_size: %d", points_.size());
 
     last_point_time_ = now;
 
@@ -112,6 +110,28 @@ namespace impact_point_estimator
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
+      // RCLCPP_INFO(this->get_logger(), "##################################################");
+      // for (int i = 0; i < points_.size(); i++)
+      // {
+      //   if (i > 0)
+      //   {
+      //     double dt = prediction_.timestamps_[i] - prediction_.timestamps_[i - 1];
+      //     double vx = (points_[i].x - points_[i - 1].x) / dt;
+      //     double vy = (points_[i].y - points_[i - 1].y) / dt;
+      //     double vz = (points_[i].z - points_[i - 1].z) / dt;
+      //     double speed = std::sqrt(vx * vx + vy * vy + vz * vz);
+      //     RCLCPP_INFO(this->get_logger(), "timestamp: %.2f", prediction_.timestamps_[i]);
+      //     RCLCPP_INFO(this->get_logger(), "point x: %.2f, y: %.2f, z: %.2f", points_[i].x, points_[i].y, points_[i].z);
+      //     RCLCPP_INFO(this->get_logger(), "speed: %.2f", speed);
+      //   }
+      //   else
+      //   {
+      //     RCLCPP_INFO(this->get_logger(), "0 timestamp: %.2f", prediction_.timestamps_[i]);
+      //     RCLCPP_INFO(this->get_logger(), "0 point x: %.2f, y: %.2f, z: %.2f", points_[i].x, points_[i].y, points_[i].z);
+      //   }
+      // }
+      // RCLCPP_INFO(this->get_logger(), "##################################################");
+
       prediction_.process_points(points_, lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_, [this](const PredictionResult &result)
                                  {
         if (result.success)
@@ -134,7 +154,7 @@ namespace impact_point_estimator
     double y1 = points[0].y;
     double x2 = points[1].x;
     double y2 = points[1].y;
-    double target_x = 0.0;
+    double target_x = first_goal_x_;
     double target_y;
 
     if (x2 - x1 != 0)
