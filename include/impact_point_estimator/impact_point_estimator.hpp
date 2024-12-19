@@ -78,6 +78,11 @@ namespace impact_point_estimator
     double two_points_diff_x_;
     double two_points_diff_y_;
 
+    double V_min_;
+    double V_max_;
+    std::vector<double> expected_direction_;
+    double theta_max_deg_;
+
     Filter filter_;
     Prediction prediction_;
   };

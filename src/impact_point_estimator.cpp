@@ -11,7 +11,7 @@ namespace impact_point_estimator
   ImpactPointEstimator::ImpactPointEstimator(const std::string &name_space, const rclcpp::NodeOptions &options)
       : rclcpp::Node("impact_point_estimator", name_space, options),
         is_predicting_(true),
-        filter_(),
+        filter_(0.0, 0.0, {1.0, 0.0, -1.0}, 30.0),
         prediction_()
   {
     RCLCPP_INFO(this->get_logger(), "impact_point_estimatorの初期化");
@@ -27,6 +27,10 @@ namespace impact_point_estimator
     lidar_to_target_z_ = this->get_parameter("lidar_to_target_z").as_double();
     two_points_diff_x_ = this->get_parameter("two_points_diff_x").as_double();
     two_points_diff_y_ = this->get_parameter("two_points_diff_y").as_double();
+    V_min_ = this->get_parameter("V_min").as_double();
+    V_max_ = this->get_parameter("V_max").as_double();
+    expected_direction_ = this->get_parameter("expected_direction").as_double_array();
+    theta_max_deg_ = this->get_parameter("theta_max_deg").as_double();
 
     // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
@@ -37,6 +41,8 @@ namespace impact_point_estimator
     points_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_points", 10);
     pose_publisher_ = this->create_publisher<geometry_msgs::msg::Pose2D>("/target_pose", 10);
     motor_pos_publisher_ = this->create_publisher<std_msgs::msg::Float64>("motor/pos", 10);
+
+    filter_ = Filter(V_min_, V_max_, expected_direction_, theta_max_deg_);
 
     last_point_time_ = std::chrono::steady_clock::now();
   }
@@ -53,6 +59,7 @@ namespace impact_point_estimator
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_point_time_).count();
 
+    RCLCPP_INFO(this->get_logger(), "dt %f, point x: %.2f, y: %.2f, z: %.2f", dt, point.x, point.y, point.z);
     if (!prediction_.is_start_time_initialized())
     {
       prediction_.set_start_time(now);
@@ -62,23 +69,28 @@ namespace impact_point_estimator
     double time_stamp = prediction_.calculate_relative_time(now);
     // RCLCPP_INFO(this->get_logger(), "dt: %.2f", dt);
 
-    if (dt > 0.15)
+    if (dt > 0.35)
     {
+      RCLCPP_WARN(this->get_logger(), "dt > 0.15 :clear_data");
       clear_data();
       last_point_time_ = now;
       if (filter_.check_point_validity(point, points_, recent_points_, lidar_to_target_z_))
       {
+        RCLCPP_WARN(this->get_logger(), "dt > 0.15 :point valid");
         points_.emplace_back(point);
         prediction_.add_timestamp(time_stamp);
       }
       return;
     }
 
+    RCLCPP_INFO(this->get_logger(), "points_size: %d", points_.size());
+
     last_point_time_ = now;
 
     // ポイントとdtを検証・追加
     if (!filter_.check_point_validity(point, points_, recent_points_, lidar_to_target_z_))
     {
+      RCLCPP_WARN(this->get_logger(), "point invalidity");
       return;
     }
     points_.emplace_back(point);
@@ -86,11 +98,9 @@ namespace impact_point_estimator
 
     if (points_.size() == 2)
     {
-      double diff_x = points_[1].x - points_[0].x;
-      double diff_y = points_[1].y - points_[0].y;
-      double diff_z = points_[1].z - points_[0].z;
-      if (diff_x > two_points_diff_x_ || abs(diff_y) > two_points_diff_y_ || diff_z < 0)
+      if (!filter_.validate_vel_and_direction(points_[0], points_[1], dt))
       {
+        RCLCPP_WARN(this->get_logger(), "Two points rejected by BallFilter");
         clear_data();
         return;
       }
@@ -124,7 +134,7 @@ namespace impact_point_estimator
     double y1 = points[0].y;
     double x2 = points[1].x;
     double y2 = points[1].y;
-    double target_x = -1.5;
+    double target_x = 0.0;
     double target_y;
 
     if (x2 - x1 != 0)
