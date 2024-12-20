@@ -75,7 +75,7 @@ namespace impact_point_estimator
       if (point.z > lidar_to_target_z_)
       {
         points_.emplace_back(point);
-        time_stamp = -0.1;
+        time_stamp = 0.0;
         prediction_.add_timestamp(time_stamp);
       }
       return;
@@ -92,7 +92,7 @@ namespace impact_point_estimator
       return;
     }
     points_.emplace_back(point);
-    prediction_.add_timestamp(time_stamp);
+    prediction_.add_timestamp(time_stamp + 0.1);
 
     if (points_.size() == 2)
     {
