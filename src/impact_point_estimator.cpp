@@ -156,9 +156,7 @@ namespace impact_point_estimator
           schedule_motor_position(result.impact_time + offset_time_);
 
           publish_points_marker();
-        }
-        pause_processing(); });
-      clear_data();
+        } });
     }
   }
 
