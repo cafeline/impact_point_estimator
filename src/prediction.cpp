@@ -4,6 +4,33 @@
 #include <random>
 #include <algorithm>
 
+std::vector<geometry_msgs::msg::Point> Prediction::process_three_points(const std::vector<geometry_msgs::msg::Point> &points,
+                                                                      double lidar_to_target_z,
+                                                                      std::function<void(const PredictionResult &)> callback)
+{
+  Eigen::VectorXd coeffs_x, coeffs_y, coeffs_z;
+  std::vector<geometry_msgs::msg::Point> curve_points = fit_cubic_curve(points, coeffs_x, coeffs_y, coeffs_z);
+  if (curve_points.empty())
+  {
+    callback({false, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+    return {};
+  }
+
+  double x_at_target, y_at_target;
+  bool success = find_xy_at_target_height(coeffs_x, coeffs_y, coeffs_z, lidar_to_target_z, x_at_target, y_at_target);
+  if (!success)
+  {
+    RCLCPP_WARN(rclcpp::get_logger("Prediction"), "目標高さでのx,y求解に失敗しました。");
+    callback({false, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+    return {};
+  }
+
+  RCLCPP_INFO(rclcpp::get_logger("Prediction"), "目標高さ z=%.3f における近似点: x=%.3f, y=%.3f", lidar_to_target_z, x_at_target, y_at_target);
+
+  callback({true, 0.0, x_at_target, y_at_target, 0.0, 0.0, lidar_to_target_z, 0.0, 0.0, 0.0});
+  return curve_points;
+}
+
 void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &points, double lidar_to_target_x, double lidar_to_target_y, double lidar_to_target_z, std::function<void(const PredictionResult &)> callback)
 {
   // 物理モデルによる弾道軌道フィッティング
@@ -30,7 +57,10 @@ void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &po
   callback({true, impact_time, x_impact, y_impact, x0, y0, z0, vx, vy, vz});
 }
 
-std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve(const std::vector<geometry_msgs::msg::Point> &points, Eigen::VectorXd &coeffs_x, Eigen::VectorXd &coeffs_y, Eigen::VectorXd &coeffs_z)
+std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve(const std::vector<geometry_msgs::msg::Point> &points,
+                                                                 Eigen::VectorXd &coeffs_x,
+                                                                 Eigen::VectorXd &coeffs_y,
+                                                                 Eigen::VectorXd &coeffs_z)
 {
   size_t n = points.size();
   if (n < 3)
@@ -68,15 +98,15 @@ std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve(const std::ve
 
   // フィットされた曲線の生成
   std::vector<geometry_msgs::msg::Point> curve_points;
-  double t_max = 1.5;        // 曲線を1.5倍先まで予測
+  double t_max = 5.0;        // 曲線を1.0倍先まで予測
   size_t total_points = 150; // より多くのポイントを生成
 
   for (size_t i = 0; i < total_points; ++i)
   {
     double t_val = static_cast<double>(i) / (total_points - 1) * t_max;
-    double xi = coeffs_x(0) * pow(t_val, 3) + coeffs_x(1) * pow(t_val, 2) + coeffs_x(2) * t_val + coeffs_x(3);
-    double yi = coeffs_y(0) * pow(t_val, 3) + coeffs_y(1) * pow(t_val, 2) + coeffs_y(2) * t_val + coeffs_y(3);
-    double zi = coeffs_z(0) * pow(t_val, 3) + coeffs_z(1) * pow(t_val, 2) + coeffs_z(2) * t_val + coeffs_z(3);
+    double xi = coeffs_x(0) * std::pow(t_val, 3) + coeffs_x(1) * std::pow(t_val, 2) + coeffs_x(2) * t_val + coeffs_x(3);
+    double yi = coeffs_y(0) * std::pow(t_val, 3) + coeffs_y(1) * std::pow(t_val, 2) + coeffs_y(2) * t_val + coeffs_y(3);
+    double zi = coeffs_z(0) * std::pow(t_val, 3) + coeffs_z(1) * std::pow(t_val, 2) + coeffs_z(2) * t_val + coeffs_z(3);
 
     geometry_msgs::msg::Point pt;
     pt.x = xi;
@@ -87,6 +117,41 @@ std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve(const std::ve
 
   return curve_points;
 }
+
+bool Prediction::find_xy_at_target_height(const Eigen::VectorXd &coeffs_x, const Eigen::VectorXd &coeffs_y, const Eigen::VectorXd &coeffs_z, double lidar_to_target_z, double &x_out, double &y_out)
+{
+  // t の探索範囲
+  double t_max = 1.5;
+  size_t search_points = 1000;
+  double best_diff = std::numeric_limits<double>::infinity();
+  double best_t = -1.0;
+
+  for (size_t i = 0; i < search_points; ++i)
+  {
+    double t_val = static_cast<double>(i) / (search_points - 1) * t_max;
+
+    double z_val = coeffs_z(0) * std::pow(t_val, 3) + coeffs_z(1) * std::pow(t_val, 2) + coeffs_z(2) * t_val + coeffs_z(3);
+    double diff = std::fabs(z_val - lidar_to_target_z);
+    if (diff < best_diff)
+    {
+      best_diff = diff;
+      best_t = t_val;
+    }
+  }
+
+  if (best_t < 0.0)
+  {
+    RCLCPP_WARN(rclcpp::get_logger("Prediction"), "目標高さに近似できる点が見つかりませんでした。");
+    return false;
+  }
+
+  // 最も近いtでのx,yを計算
+  x_out = coeffs_x(0) * std::pow(best_t, 3) + coeffs_x(1) * std::pow(best_t, 2) + coeffs_x(2) * best_t + coeffs_x(3);
+  y_out = coeffs_y(0) * std::pow(best_t, 3) + coeffs_y(1) * std::pow(best_t, 2) + coeffs_y(2) * best_t + coeffs_y(3);
+
+  return true;
+}
+
 
 double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg::Point> &points, std::chrono::steady_clock::time_point start_time, std::chrono::steady_clock::time_point end_time, double lidar_to_target_z)
 {
@@ -118,7 +183,7 @@ double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg
 
   // 二次方程式の係数を設定
   // z = z0 + v0*t - (1/2)*g*t^2 から
-  // (1/2)*g*t^2 - v0*t + (z0 - z_target) = 0 の形に変形
+  // (1/2)*g*t^2 - v0*t + (z0 - lidar_to_target_x) = 0 の形に変形
   double a = 0.5 * 9.81;             // 重力加速度の1/2
   double b = -v0;                    // 初期速度の負値
   double c = z0 - lidar_to_target_z; // 初期高さと目標高さの差
@@ -165,19 +230,6 @@ double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg
     RCLCPP_WARN(rclcpp::get_logger("Prediction"), "有効な着弾時間を見つけられませんでした。");
     return -1.0;
   }
-}
-
-std::tuple<double, double, double> Prediction::calculate_centroid(const std::vector<geometry_msgs::msg::Point> &points)
-{
-  double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
-  for (const auto &pt : points)
-  {
-    sum_x += pt.x;
-    sum_y += pt.y;
-    sum_z += pt.z;
-  }
-  size_t n = points.size();
-  return {sum_x / n, sum_y / n, sum_z / n};
 }
 
 std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve_ransac(const std::vector<geometry_msgs::msg::Point> &points, Eigen::VectorXd &coeffs_x, Eigen::VectorXd &coeffs_y, Eigen::VectorXd &coeffs_z, double threshold, int max_iterations)
@@ -376,49 +428,49 @@ bool Prediction::fit_ballistic_trajectory(const std::vector<geometry_msgs::msg::
 bool Prediction::calculate_impact_point(double lidar_to_target_x, double lidar_to_target_y, double lidar_to_target_z, double z0, double vz, double &impact_time, double x0, double y0, double vx, double vy, double &x_impact, double &y_impact)
 {
   // z(t) = z0 + vz * t - 0.5 * g * t^2
-    // 着地時点では z(t) = lidar_to_target_z
-    // => 0.5 * g * t^2 - vz * t + (z0 - lidar_to_target_z) = 0
+  // 着地時点では z(t) = lidar_to_target_z
+  // => 0.5 * g * t^2 - vz * t + (z0 - lidar_to_target_z) = 0
 
-    double a = 0.5 * 9.81;
-    double b = -vz;
-    double c = - z0 + lidar_to_target_z;
+  double a = 0.5 * 9.81;
+  double b = -vz;
+  double c = -z0 + lidar_to_target_z;
 
-    double discriminant = b * b - 4 * a * c;
+  double discriminant = b * b - 4 * a * c;
 
-    if (discriminant < 0)
-    {
-        RCLCPP_WARN(rclcpp::get_logger("Prediction"), "着地時間の計算に失敗しました（判別式が負）。");
-        return false;
-    }
+  if (discriminant < 0)
+  {
+    RCLCPP_WARN(rclcpp::get_logger("Prediction"), "着地時間の計算に失敗しました（判別式が負）。");
+    return false;
+  }
 
-    double sqrt_discriminant = std::sqrt(discriminant);
-    double t1 = (-b + sqrt_discriminant) / (2 * a);
-    double t2 = (-b - sqrt_discriminant) / (2 * a);
+  double sqrt_discriminant = std::sqrt(discriminant);
+  double t1 = (-b + sqrt_discriminant) / (2 * a);
+  double t2 = (-b - sqrt_discriminant) / (2 * a);
 
-    // 正の解を選択
-    if (t1 >= 0 && t2 >= 0)
-    {
-        impact_time = std::min(t1, t2);
-    }
-    else if (t1 >= 0)
-    {
-        impact_time = t1;
-    }
-    else if (t2 >= 0)
-    {
-        impact_time = t2;
-    }
-    else
-    {
-        RCLCPP_WARN(rclcpp::get_logger("Prediction"), "有効な着地時間が見つかりませんでした。");
-        return false;
-    }
+  // 正の解を選択
+  if (t1 >= 0 && t2 >= 0)
+  {
+    impact_time = std::min(t1, t2);
+  }
+  else if (t1 >= 0)
+  {
+    impact_time = t1;
+  }
+  else if (t2 >= 0)
+  {
+    impact_time = t2;
+  }
+  else
+  {
+    RCLCPP_WARN(rclcpp::get_logger("Prediction"), "有効な着地時間が見つかりませんでした。");
+    return false;
+  }
 
-    // 着地時点のx, y座標を計算
-    x_impact = x0 + vx * impact_time + lidar_to_target_x;
-    y_impact = y0 + vy * impact_time + lidar_to_target_y;
+  // 着地時点のx, y座標を計算
+  x_impact = x0 + vx * impact_time + lidar_to_target_x;
+  y_impact = y0 + vy * impact_time + lidar_to_target_y;
 
-    return true;
+  return true;
 }
 
 double Prediction::calculate_relative_time(std::chrono::steady_clock::time_point current_time)

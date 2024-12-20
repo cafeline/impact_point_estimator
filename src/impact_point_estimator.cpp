@@ -107,6 +107,20 @@ namespace impact_point_estimator
       double standby_delay = 3.0;
       schedule_standby_and_reroad(standby_delay);
     }
+    // else if (points_.size() == 3)
+    // {
+    //   std::vector<geometry_msgs::msg::Point> curve_points = prediction_.process_three_points(points_, lidar_to_target_z_, [this](const PredictionResult &result)
+    //                                                                                          {
+    //     if (result.success)
+    //     {
+    //       publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact, result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
+    //     } });
+    //   if (curve_points.empty())
+    //   {
+    //     return;
+    //   }
+    //   publish_three_points_curve(curve_points);
+    // }
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
@@ -201,16 +215,15 @@ namespace impact_point_estimator
   {
     RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.2f, %.2f), height=%.2f", impact_time, x_impact, y_impact, lidar_to_target_z_);
 
-    // 可視化用に軌道をプロット
-    std::vector<geometry_msgs::msg::Point> trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
-    publish_curve_marker(trajectory_points);
-
     // 着弾地点をすぐにpublish
     geometry_msgs::msg::Point final_point;
     final_point.x = x_impact;
     final_point.y = y_impact;
     final_point.z = lidar_to_target_z_;
     publish_final_pose(final_point);
+    // 可視化用に軌道をプロット
+    std::vector<geometry_msgs::msg::Point> trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
+    publish_curve_marker(trajectory_points);
   }
 
   void ImpactPointEstimator::publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points)
@@ -400,10 +413,27 @@ namespace impact_point_estimator
     trajectory_marker.color.r = 0.0;
     trajectory_marker.color.g = 0.0;
     trajectory_marker.color.b = 1.0;
-    trajectory_marker.color.a = 1.0;
+    trajectory_marker.color.a = 0.5;
 
     trajectory_marker.points = trajectory_points;
     publisher_->publish(trajectory_marker);
   }
 
+  void ImpactPointEstimator::publish_three_points_curve(const std::vector<geometry_msgs::msg::Point> &curve_points)
+  {
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->get_clock()->now();
+    marker.ns = "cubic_curve";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.scale.x = 0.05; // 線の幅
+    marker.color.r = 0.5;
+    marker.color.g = 0.0;
+    marker.color.b = 0.5;
+    marker.color.a = 0.5;
+    marker.points = curve_points;
+    publisher_->publish(marker);
+  }
 } // namespace impact_point_estimator

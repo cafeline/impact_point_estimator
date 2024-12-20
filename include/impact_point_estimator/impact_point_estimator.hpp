@@ -35,6 +35,7 @@ namespace impact_point_estimator
 
     void publish_estimated_impact(double impact_time, double x_impact, double y_impact, double x0, double y0, double z0, double vx, double vy, double vz);
     void publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points);
+    void publish_three_points_curve(const std::vector<geometry_msgs::msg::Point> &curve_points);
     void publish_points_marker();
     void publish_final_pose(const geometry_msgs::msg::Point &final_point);
     void publish_motor_pos(double angle_rad);
