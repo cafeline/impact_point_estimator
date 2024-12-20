@@ -153,7 +153,9 @@ namespace impact_point_estimator
           // 予測が成功したらすぐに着弾地点をpublish
           publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact, result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
           // impact_time 後に motor_pos_ をパブリッシュ
-          schedule_motor_position(result.impact_time + offset_time_);
+          double adjusted_impact_time = result.impact_time - points_.size() * 0.1 + offset_time_;
+          RCLCPP_INFO(this->get_logger(), "adjusted_impact_time: %.2f", adjusted_impact_time);
+          schedule_motor_position(adjusted_impact_time);
 
           publish_points_marker();
         } });
@@ -211,7 +213,7 @@ namespace impact_point_estimator
       double x0, double y0, double z0,
       double vx, double vy, double vz)
   {
-    RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.2f, %.2f), height=%.2f", impact_time, x_impact, y_impact, lidar_to_target_z_);
+    RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.3f, %.3f), height=%.3f", impact_time, x_impact, y_impact, lidar_to_target_z_);
 
     // 着弾地点をすぐにpublish
     geometry_msgs::msg::Point final_point;
