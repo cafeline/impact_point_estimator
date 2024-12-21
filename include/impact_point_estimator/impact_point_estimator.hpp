@@ -6,6 +6,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/pose2_d.hpp>
 #include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <vector>
 #include <cmath>
@@ -51,7 +52,8 @@ namespace impact_point_estimator
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr subscription_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr points_publisher_;
-    rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_publisher_;
+    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr pose_publisher_;
+    // rclcpp::Publisher<geometry_msgs::msg::Pose2D>::SharedPtr pose_publisher_;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr motor_pos_publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr pause_timer_;

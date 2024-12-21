@@ -37,7 +37,8 @@ namespace impact_point_estimator
     // パブリッシャーの設定
     publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_curve", 10);
     points_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_points", 10);
-    pose_publisher_ = this->create_publisher<geometry_msgs::msg::Pose2D>("/target_pose", 10);
+    pose_publisher_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/target_pose", 10);
+    // pose_publisher_ = this->create_publisher<geometry_msgs::msg::Pose2D>("/target_pose", 10);
     motor_pos_publisher_ = this->create_publisher<std_msgs::msg::Float64>("motor/pos", 10);
 
     filter_ = Filter(V_min_, V_max_, expected_direction_, theta_max_deg_);
@@ -102,7 +103,7 @@ namespace impact_point_estimator
         clear_data();
         return;
       }
-      process_two_points(points_);
+      // process_two_points(points_);
       // 3秒後に standby_pose と reroad_ をpublish
       double standby_delay = 3.0;
       schedule_standby_and_reroad(standby_delay);
@@ -177,10 +178,12 @@ namespace impact_point_estimator
       target_y = y1 + slope * (target_x - x1);
 
       // 目標姿勢を作成してパブリッシュ
-      geometry_msgs::msg::Pose2D target_pose;
-      target_pose.x = target_x;
-      target_pose.y = target_y;
-      target_pose.theta = 0.0;
+      geometry_msgs::msg::PointStamped target_pose;
+      target_pose.header.frame_id = "map";
+      target_pose.header.stamp = this->get_clock()->now();
+      target_pose.point.x = target_x;
+      target_pose.point.y = target_y;
+      target_pose.point.z = 0.0;
       pose_publisher_->publish(target_pose);
       RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f", target_x, target_y);
 
@@ -278,13 +281,15 @@ namespace impact_point_estimator
 
   void ImpactPointEstimator::publish_final_pose(const geometry_msgs::msg::Point &final_point)
   {
-    geometry_msgs::msg::Pose2D target_pose;
-    target_pose.x = final_point.x;
-    target_pose.y = final_point.y;
-    target_pose.theta = 0.0;
+    geometry_msgs::msg::PointStamped target_pose;
+    target_pose.header.frame_id = "map";
+    target_pose.header.stamp = this->get_clock()->now();
+    target_pose.point.x = final_point.x;
+    target_pose.point.y = final_point.y;
+    target_pose.point.z = final_point.z;
     pose_publisher_->publish(target_pose);
-    RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f (height=%.2f), theta=%.2f",
-                target_pose.x, target_pose.y, final_point.z, target_pose.theta);
+    RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f (height=%.2f)",
+                target_pose.point.x, target_pose.point.y, final_point.z);
   }
 
   void ImpactPointEstimator::schedule_motor_position(double delay)
@@ -317,10 +322,12 @@ namespace impact_point_estimator
           [this]()
           {
             // standby_poseのpublish
-            geometry_msgs::msg::Pose2D standby_pose;
-            standby_pose.x = standby_pose_x_;
-            standby_pose.y = standby_pose_y_;
-            standby_pose.theta = 0.0;
+            geometry_msgs::msg::PointStamped standby_pose;
+            standby_pose.header.frame_id = "map";
+            standby_pose.header.stamp = this->get_clock()->now();
+            standby_pose.point.x = standby_pose_x_;
+            standby_pose.point.y = standby_pose_y_;
+            standby_pose.point.z = 0.0;
             pose_publisher_->publish(standby_pose);
             // reroad_をpublish
             std_msgs::msg::Float64 motor_msg;
@@ -332,10 +339,12 @@ namespace impact_point_estimator
     }
     else
     {
-      geometry_msgs::msg::Pose2D standby_pose;
-      standby_pose.x = standby_pose_x_;
-      standby_pose.y = standby_pose_y_;
-      standby_pose.theta = 0.0;
+      geometry_msgs::msg::PointStamped standby_pose;
+      standby_pose.header.frame_id = "map";
+      standby_pose.header.stamp = this->get_clock()->now();
+      standby_pose.point.x = standby_pose_x_;
+      standby_pose.point.y = standby_pose_y_;
+      standby_pose.point.z = 0.0;
       pose_publisher_->publish(standby_pose);
 
       std_msgs::msg::Float64 motor_msg;
