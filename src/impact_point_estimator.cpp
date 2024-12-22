@@ -30,6 +30,8 @@ namespace impact_point_estimator
     expected_direction_ = this->get_parameter("expected_direction").as_double_array();
     theta_max_deg_ = this->get_parameter("theta_max_deg").as_double();
     first_goal_x_ = this->get_parameter("first_goal_x").as_double();
+    standby_delay_ = this->get_parameter("standby_delay").as_double();
+
     // サブスクライバーの設定
     subscription_ = this->create_subscription<visualization_msgs::msg::Marker>(
         "tennis_ball", 10, std::bind(&ImpactPointEstimator::listener_callback, this, std::placeholders::_1));
@@ -52,6 +54,7 @@ namespace impact_point_estimator
     {
       return;
     }
+    auto start = std::chrono::high_resolution_clock::now();
 
     geometry_msgs::msg::Point point = msg->pose.position;
     // 現在時刻を取得
@@ -105,8 +108,7 @@ namespace impact_point_estimator
       }
       // process_two_points(points_);
       // 3秒後に standby_pose と reroad_ をpublish
-      double standby_delay = 3.0;
-      schedule_standby_and_reroad(standby_delay);
+      schedule_standby_and_reroad(standby_delay_);
     }
     // else if (points_.size() == 3)
     // {
@@ -161,6 +163,7 @@ namespace impact_point_estimator
           publish_points_marker();
         } });
     }
+        RCLCPP_INFO(this->get_logger(), "exec time: %ld ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start).count());
   }
 
   void ImpactPointEstimator::process_two_points(const std::vector<geometry_msgs::msg::Point> &points)
@@ -222,7 +225,7 @@ namespace impact_point_estimator
     geometry_msgs::msg::Point final_point;
     final_point.x = x_impact;
     final_point.y = y_impact;
-    final_point.z = lidar_to_target_z_;
+    final_point.z = 0.0;
     publish_final_pose(final_point);
     // 可視化用に軌道をプロット
     std::vector<geometry_msgs::msg::Point> trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
@@ -286,10 +289,11 @@ namespace impact_point_estimator
     target_pose.header.stamp = this->get_clock()->now();
     target_pose.point.x = final_point.x;
     target_pose.point.y = final_point.y;
-    target_pose.point.z = final_point.z;
+    target_pose.point.z = 0.0;
+    RCLCPP_INFO(this->get_logger(), "time: %lf", this->now().seconds());
     pose_publisher_->publish(target_pose);
-    RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f (height=%.2f)",
-                target_pose.point.x, target_pose.point.y, final_point.z);
+    RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f z=%.2f",
+                target_pose.point.x, target_pose.point.y, target_pose.point.z);
   }
 
   void ImpactPointEstimator::schedule_motor_position(double delay)

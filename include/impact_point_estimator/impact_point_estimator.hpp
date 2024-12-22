@@ -83,7 +83,7 @@ namespace impact_point_estimator
     std::vector<double> expected_direction_;
     double theta_max_deg_;
     double first_goal_x_;
-
+    double standby_delay_;
     Filter filter_;
     Prediction prediction_;
   };
