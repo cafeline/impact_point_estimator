@@ -5,8 +5,8 @@
 #include <algorithm>
 
 std::vector<geometry_msgs::msg::Point> Prediction::process_three_points(const std::vector<geometry_msgs::msg::Point> &points,
-                                                                      double lidar_to_target_z,
-                                                                      std::function<void(const PredictionResult &)> callback)
+                                                                        double lidar_to_target_z,
+                                                                        std::function<void(const PredictionResult &)> callback)
 {
   Eigen::VectorXd coeffs_x, coeffs_y, coeffs_z;
   std::vector<geometry_msgs::msg::Point> curve_points = fit_cubic_curve(points, coeffs_x, coeffs_y, coeffs_z);
@@ -58,9 +58,9 @@ void Prediction::process_points(const std::vector<geometry_msgs::msg::Point> &po
 }
 
 std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve(const std::vector<geometry_msgs::msg::Point> &points,
-                                                                 Eigen::VectorXd &coeffs_x,
-                                                                 Eigen::VectorXd &coeffs_y,
-                                                                 Eigen::VectorXd &coeffs_z)
+                                                                   Eigen::VectorXd &coeffs_x,
+                                                                   Eigen::VectorXd &coeffs_y,
+                                                                   Eigen::VectorXd &coeffs_z)
 {
   size_t n = points.size();
   if (n < 3)
@@ -104,9 +104,9 @@ std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve(const std::ve
   for (size_t i = 0; i < total_points; ++i)
   {
     double t_val = static_cast<double>(i) / (total_points - 1) * t_max;
-    double xi = coeffs_x(0) * std::pow(t_val, 3) + coeffs_x(1) * std::pow(t_val, 2) + coeffs_x(2) * t_val + coeffs_x(3);
-    double yi = coeffs_y(0) * std::pow(t_val, 3) + coeffs_y(1) * std::pow(t_val, 2) + coeffs_y(2) * t_val + coeffs_y(3);
-    double zi = coeffs_z(0) * std::pow(t_val, 3) + coeffs_z(1) * std::pow(t_val, 2) + coeffs_z(2) * t_val + coeffs_z(3);
+    double xi = evaluateCubic(coeffs_x, t_val);
+    double yi = evaluateCubic(coeffs_y, t_val);
+    double zi = evaluateCubic(coeffs_z, t_val);
 
     geometry_msgs::msg::Point pt;
     pt.x = xi;
@@ -130,7 +130,7 @@ bool Prediction::find_xy_at_target_height(const Eigen::VectorXd &coeffs_x, const
   {
     double t_val = static_cast<double>(i) / (search_points - 1) * t_max;
 
-    double z_val = coeffs_z(0) * std::pow(t_val, 3) + coeffs_z(1) * std::pow(t_val, 2) + coeffs_z(2) * t_val + coeffs_z(3);
+    double z_val = evaluateCubic(coeffs_z, t_val);
     double diff = std::fabs(z_val - lidar_to_target_z);
     if (diff < best_diff)
     {
@@ -146,12 +146,11 @@ bool Prediction::find_xy_at_target_height(const Eigen::VectorXd &coeffs_x, const
   }
 
   // 最も近いtでのx,yを計算
-  x_out = coeffs_x(0) * std::pow(best_t, 3) + coeffs_x(1) * std::pow(best_t, 2) + coeffs_x(2) * best_t + coeffs_x(3);
-  y_out = coeffs_y(0) * std::pow(best_t, 3) + coeffs_y(1) * std::pow(best_t, 2) + coeffs_y(2) * best_t + coeffs_y(3);
+  x_out = evaluateCubic(coeffs_x, best_t);
+  y_out = evaluateCubic(coeffs_y, best_t);
 
   return true;
 }
-
 
 double Prediction::calculate_time_to_height(const std::vector<geometry_msgs::msg::Point> &points, std::chrono::steady_clock::time_point start_time, std::chrono::steady_clock::time_point end_time, double lidar_to_target_z)
 {
@@ -284,9 +283,9 @@ std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve_ransac(const 
       double t = static_cast<double>(i) / (n - 1);
 
       // フィッティング曲線上の点を計算
-      double fitted_x = sample_coeffs_x(0) * pow(t, 3) + sample_coeffs_x(1) * pow(t, 2) + sample_coeffs_x(2) * t + sample_coeffs_x(3);
-      double fitted_y = sample_coeffs_y(0) * pow(t, 3) + sample_coeffs_y(1) * pow(t, 2) + sample_coeffs_y(2) * t + sample_coeffs_y(3);
-      double fitted_z = sample_coeffs_z(0) * pow(t, 3) + sample_coeffs_z(1) * pow(t, 2) + sample_coeffs_z(2) * t + sample_coeffs_z(3);
+      double fitted_x = evaluateCubic(sample_coeffs_x, t);
+      double fitted_y = evaluateCubic(sample_coeffs_y, t);
+      double fitted_z = evaluateCubic(sample_coeffs_z, t);
 
       // 実際の点との距離を計算
       double dist = std::hypot(points[i].x - fitted_x, std::hypot(points[i].y - fitted_y, points[i].z - fitted_z));
@@ -337,9 +336,9 @@ std::vector<geometry_msgs::msg::Point> Prediction::fit_cubic_curve_ransac(const 
       for (size_t i = 0; i < total_points; ++i)
       {
         double t_val = static_cast<double>(i) / (total_points - 1) * t_max;
-        double xi = coeffs_x(0) * pow(t_val, 3) + coeffs_x(1) * pow(t_val, 2) + coeffs_x(2) * t_val + coeffs_x(3);
-        double yi = coeffs_y(0) * pow(t_val, 3) + coeffs_y(1) * pow(t_val, 2) + coeffs_y(2) * t_val + coeffs_y(3);
-        double zi = coeffs_z(0) * pow(t_val, 3) + coeffs_z(1) * pow(t_val, 2) + coeffs_z(2) * t_val + coeffs_z(3);
+        double xi = evaluateCubic(coeffs_x, t_val);
+        double yi = evaluateCubic(coeffs_y, t_val);
+        double zi = evaluateCubic(coeffs_z, t_val);
 
         geometry_msgs::msg::Point pt;
         pt.x = xi;
@@ -527,4 +526,12 @@ std::vector<geometry_msgs::msg::Point> Prediction::generate_trajectory_points(do
   }
 
   return trajectory;
+}
+
+double Prediction::evaluateCubic(const Eigen::VectorXd &coeffs, double t)
+{
+  return coeffs(0) * std::pow(t, 3) +
+         coeffs(1) * std::pow(t, 2) +
+         coeffs(2) * t +
+         coeffs(3);
 }

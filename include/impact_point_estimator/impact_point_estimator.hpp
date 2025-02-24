@@ -49,6 +49,18 @@ namespace impact_point_estimator
     void publish_two_ball_marker(const geometry_msgs::msg::Point &point1, const geometry_msgs::msg::Point &point2);
     void publish_linear_trajectory_marker(const std::vector<geometry_msgs::msg::Point> &trajectory_points);
 
+    // --- 新たに追加したヘルパーメソッド ---
+    geometry_msgs::msg::PointStamped createPointStamped(double x, double y, double z) const;
+    visualization_msgs::msg::Marker createMarker(const std::string &ns,
+                                                 int id,
+                                                 int type,
+                                                 double scale_x,
+                                                 double scale_y,
+                                                 double scale_z,
+                                                 double r, double g, double b, double a) const;
+    void handleDtTimeout(const geometry_msgs::msg::Point &point, const std::chrono::steady_clock::time_point &now);
+    // --------------------------------------
+
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr subscription_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr publisher_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr points_publisher_;

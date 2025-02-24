@@ -5,6 +5,54 @@ using namespace std::chrono_literals;
 
 namespace impact_point_estimator
 {
+  geometry_msgs::msg::PointStamped ImpactPointEstimator::createPointStamped(double x, double y, double z) const
+  {
+    geometry_msgs::msg::PointStamped stamp;
+    stamp.header.frame_id = "map";
+    stamp.header.stamp = this->now();
+    stamp.point.x = x;
+    stamp.point.y = y;
+    stamp.point.z = z;
+    return stamp;
+  }
+
+  visualization_msgs::msg::Marker ImpactPointEstimator::createMarker(const std::string &ns,
+                                                                     int id,
+                                                                     int type,
+                                                                     double scale_x,
+                                                                     double scale_y,
+                                                                     double scale_z,
+                                                                     double r, double g, double b, double a) const
+  {
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->now();
+    marker.ns = ns;
+    marker.id = id;
+    marker.type = type;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.scale.x = scale_x;
+    marker.scale.y = scale_y;
+    marker.scale.z = scale_z;
+    marker.color.r = r;
+    marker.color.g = g;
+    marker.color.b = b;
+    marker.color.a = a;
+    return marker;
+  }
+
+  void ImpactPointEstimator::handleDtTimeout(const geometry_msgs::msg::Point &point, const std::chrono::steady_clock::time_point &now)
+  {
+    RCLCPP_WARN(this->get_logger(), "dt exceeds threshold. Clearing data.");
+    clear_data();
+    last_point_time_ = now;
+    if (point.z > lidar_to_target_z_)
+    {
+      points_.emplace_back(point);
+      prediction_.add_timestamp(0.0);
+    }
+  }
+
   ImpactPointEstimator::ImpactPointEstimator(const rclcpp::NodeOptions &options)
       : ImpactPointEstimator("", options) {}
 
@@ -40,7 +88,6 @@ namespace impact_point_estimator
     publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_curve", 10);
     points_publisher_ = this->create_publisher<visualization_msgs::msg::Marker>("/fitted_points", 10);
     pose_publisher_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/target_pose", 10);
-    // pose_publisher_ = this->create_publisher<geometry_msgs::msg::Pose2D>("/target_pose", 10);
     motor_pos_publisher_ = this->create_publisher<std_msgs::msg::Float64>("motor/pos", 10);
 
     filter_ = Filter(V_min_, V_max_, expected_direction_, theta_max_deg_);
@@ -61,35 +108,21 @@ namespace impact_point_estimator
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_point_time_).count();
 
-    // RCLCPP_INFO(this->get_logger(), "dt %f, point x: %.2f, y: %.2f, z: %.2f", dt, point.x, point.y, point.z);
     if (!prediction_.is_start_time_initialized())
     {
       prediction_.set_start_time(now);
     }
 
-    // 相対時間を計算
     double time_stamp = prediction_.calculate_relative_time(now);
-    // RCLCPP_INFO(this->get_logger(), "dt: %.2f", dt);
 
     if (dt > 0.35)
     {
-      RCLCPP_WARN(this->get_logger(), "dt = %.2f > 0.35 :clear_data", dt);
-      clear_data();
-      last_point_time_ = now;
-      if (point.z > lidar_to_target_z_)
-      {
-        points_.emplace_back(point);
-        time_stamp = 0.0;
-        prediction_.add_timestamp(time_stamp);
-      }
+      handleDtTimeout(point, now);
       return;
     }
 
-    // RCLCPP_INFO(this->get_logger(), "points_size: %d", points_.size());
-
     last_point_time_ = now;
 
-    // ポイントとdtを検証・追加
     if (!filter_.check_point_validity(point, points_, recent_points_, lidar_to_target_z_))
     {
       RCLCPP_WARN(this->get_logger(), "point invalidity");
@@ -106,64 +139,27 @@ namespace impact_point_estimator
         clear_data();
         return;
       }
-      // process_two_points(points_);
-      // 3秒後に standby_pose と reroad_ をpublish
       schedule_standby_and_reroad(standby_delay_);
     }
-    // else if (points_.size() == 3)
-    // {
-    //   std::vector<geometry_msgs::msg::Point> curve_points = prediction_.process_three_points(points_, lidar_to_target_z_, [this](const PredictionResult &result)
-    //                                                                                          {
-    //     if (result.success)
-    //     {
-    //       publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact, result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
-    //     } });
-    //   if (curve_points.empty())
-    //   {
-    //     return;
-    //   }
-    //   publish_three_points_curve(curve_points);
-    // }
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
-      // RCLCPP_INFO(this->get_logger(), "##################################################");
-      // for (int i = 0; i < points_.size(); i++)
-      // {
-      //   if (i > 0)
-      //   {
-      //     double dt = prediction_.timestamps_[i] - prediction_.timestamps_[i - 1];
-      //     double vx = (points_[i].x - points_[i - 1].x) / dt;
-      //     double vy = (points_[i].y - points_[i - 1].y) / dt;
-      //     double vz = (points_[i].z - points_[i - 1].z) / dt;
-      //     double speed = std::sqrt(vx * vx + vy * vy + vz * vz);
-      //     RCLCPP_INFO(this->get_logger(), "timestamp: %.2f", prediction_.timestamps_[i]);
-      //     RCLCPP_INFO(this->get_logger(), "point x: %.2f, y: %.2f, z: %.2f", points_[i].x, points_[i].y, points_[i].z);
-      //     RCLCPP_INFO(this->get_logger(), "speed: %.2f", speed);
-      //   }
-      //   else
-      //   {
-      //     RCLCPP_INFO(this->get_logger(), "0 timestamp: %.2f", prediction_.timestamps_[i]);
-      //     RCLCPP_INFO(this->get_logger(), "0 point x: %.2f, y: %.2f, z: %.2f", points_[i].x, points_[i].y, points_[i].z);
-      //   }
-      // }
-      // RCLCPP_INFO(this->get_logger(), "##################################################");
-
-      prediction_.process_points(points_, lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_, [this](const PredictionResult &result)
+      prediction_.process_points(points_, lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_,
+                                 [this](const PredictionResult &result)
                                  {
-        if (result.success)
-        {
-          // 予測が成功したらすぐに着弾地点をpublish
-          publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact, result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
-          // impact_time 後に motor_pos_ をパブリッシュ
-          double adjusted_impact_time = result.impact_time - points_.size() * 0.1 + offset_time_;
-          RCLCPP_INFO(this->get_logger(), "adjusted_impact_time: %.2f", adjusted_impact_time);
-          schedule_motor_position(adjusted_impact_time);
-
-          publish_points_marker();
-        } });
+                                   if (result.success)
+                                   {
+                                     publish_estimated_impact(result.impact_time, result.x_impact, result.y_impact,
+                                                              result.x0, result.y0, result.z0, result.vx, result.vy, result.vz);
+                                     double adjusted_impact_time = result.impact_time - points_.size() * 0.1 + offset_time_;
+                                     RCLCPP_INFO(this->get_logger(), "adjusted_impact_time: %.2f", adjusted_impact_time);
+                                     schedule_motor_position(adjusted_impact_time);
+                                     publish_points_marker();
+                                   }
+                                 });
     }
-        RCLCPP_INFO(this->get_logger(), "exec time: %ld ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start).count());
+    RCLCPP_INFO(this->get_logger(), "exec time: %ld ms",
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start).count());
   }
 
   void ImpactPointEstimator::process_two_points(const std::vector<geometry_msgs::msg::Point> &points)
@@ -180,23 +176,13 @@ namespace impact_point_estimator
       double slope = (y2 - y1) / (x2 - x1);
       target_y = y1 + slope * (target_x - x1);
 
-      // 目標姿勢を作成してパブリッシュ
-      geometry_msgs::msg::PointStamped target_pose;
-      target_pose.header.frame_id = "map";
-      target_pose.header.stamp = this->get_clock()->now();
-      target_pose.point.x = target_x;
-      target_pose.point.y = target_y;
-      target_pose.point.z = 0.0;
+      auto target_pose = createPointStamped(target_x, target_y, 0.0);
       pose_publisher_->publish(target_pose);
       RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f", target_x, target_y);
 
-      // ボールマーカーをパブリッシュ
       publish_two_ball_marker(points[0], points[1]);
 
-      // 2点間を線で結ぶ軌道を作成してパブリッシュ
-      std::vector<geometry_msgs::msg::Point> trajectory_points;
-      trajectory_points.emplace_back(points[0]);
-      trajectory_points.emplace_back(points[1]);
+      std::vector<geometry_msgs::msg::Point> trajectory_points{points[0], points[1]};
       publish_linear_trajectory_marker(trajectory_points);
     }
     else
@@ -210,87 +196,44 @@ namespace impact_point_estimator
     points_.clear();
     recent_points_.clear();
     prediction_.timestamps_.clear();
-    // Prediction内部の開始時刻フラグをリセット
     prediction_.reset_start_time();
   }
 
-  void ImpactPointEstimator::publish_estimated_impact(
-      double impact_time, double x_impact, double y_impact,
-      double x0, double y0, double z0,
-      double vx, double vy, double vz)
+  void ImpactPointEstimator::publish_estimated_impact(double impact_time, double x_impact, double y_impact,
+                                                      double x0, double y0, double z0,
+                                                      double vx, double vy, double vz)
   {
     RCLCPP_INFO(this->get_logger(), "着弾時間: %.2f s, 着弾地点: (%.3f, %.3f), height=%.3f", impact_time, x_impact, y_impact, lidar_to_target_z_);
 
-    // 着弾地点をすぐにpublish
-    geometry_msgs::msg::Point final_point;
-    final_point.x = x_impact;
-    final_point.y = y_impact;
-    final_point.z = 0.0;
-    publish_final_pose(final_point);
-    // 可視化用に軌道をプロット
-    std::vector<geometry_msgs::msg::Point> trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
+    auto final_pose = createPointStamped(x_impact, y_impact, 0.0);
+    publish_final_pose(final_pose.point);
+
+    auto trajectory_points = prediction_.generate_trajectory_points(x0, y0, z0, vx, vy, vz, impact_time);
     publish_curve_marker(trajectory_points);
   }
 
   void ImpactPointEstimator::publish_curve_marker(const std::vector<geometry_msgs::msg::Point> &curve_points)
   {
-    visualization_msgs::msg::Marker curve_marker;
-    curve_marker.header.frame_id = "map";
-    curve_marker.header.stamp = this->get_clock()->now();
-    curve_marker.ns = "fitted_curve";
-    curve_marker.id = 0;
-    curve_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    curve_marker.action = visualization_msgs::msg::Marker::ADD;
-    curve_marker.scale.x = 0.02; // 線の太さ
-
-    // 色の設定を修正
-    curve_marker.color.r = 1.0;
-    curve_marker.color.g = 0.0;
-    curve_marker.color.b = 0.0;
-    curve_marker.color.a = 1.0;
-
-    curve_marker.points = curve_points;
-    publisher_->publish(curve_marker);
+    auto marker = createMarker("fitted_curve", 0, visualization_msgs::msg::Marker::LINE_STRIP,
+                               0.02, 0.02, 0.02,
+                               1.0, 0.0, 0.0, 1.0);
+    marker.points = curve_points;
+    publisher_->publish(marker);
   }
 
   void ImpactPointEstimator::publish_points_marker()
   {
-    visualization_msgs::msg::Marker points_marker;
-    points_marker.header.frame_id = "map";
-    points_marker.header.stamp = this->get_clock()->now();
-    points_marker.ns = "original_points";
-    points_marker.id = 1;
-    points_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
-    points_marker.action = visualization_msgs::msg::Marker::ADD;
-
-    points_marker.scale.x = 0.07;
-    points_marker.scale.y = 0.07;
-    points_marker.scale.z = 0.07;
-
-    points_marker.color.r = 0.0;
-    points_marker.color.g = 1.0;
-    points_marker.color.b = 0.5;
-    points_marker.color.a = 1.0;
-
-    points_marker.lifetime = rclcpp::Duration(0, 0);
-
-    for (const auto &pt : points_)
-    {
-      points_marker.points.emplace_back(pt);
-    }
-
-    points_publisher_->publish(points_marker);
+    auto marker = createMarker("original_points", 1, visualization_msgs::msg::Marker::SPHERE_LIST,
+                               0.07, 0.07, 0.07,
+                               0.0, 1.0, 0.5, 1.0);
+    marker.lifetime = rclcpp::Duration(0, 0);
+    marker.points = points_;
+    points_publisher_->publish(marker);
   }
 
   void ImpactPointEstimator::publish_final_pose(const geometry_msgs::msg::Point &final_point)
   {
-    geometry_msgs::msg::PointStamped target_pose;
-    target_pose.header.frame_id = "map";
-    target_pose.header.stamp = this->get_clock()->now();
-    target_pose.point.x = final_point.x;
-    target_pose.point.y = final_point.y;
-    target_pose.point.z = 0.0;
-    RCLCPP_INFO(this->get_logger(), "time: %lf", this->now().seconds());
+    auto target_pose = createPointStamped(final_point.x, final_point.y, 0.0);
     pose_publisher_->publish(target_pose);
     RCLCPP_INFO(this->get_logger(), "Published target_pose: x=%.2f, y=%.2f z=%.2f",
                 target_pose.point.x, target_pose.point.y, target_pose.point.z);
@@ -315,7 +258,6 @@ namespace impact_point_estimator
     }
   }
 
-  // impact_time + 3秒後にstandby_poseとreroad_をpublishする
   void ImpactPointEstimator::schedule_standby_and_reroad(double delay)
   {
     if (delay > 0.0)
@@ -325,32 +267,18 @@ namespace impact_point_estimator
           delay_ms,
           [this]()
           {
-            // standby_poseのpublish
-            geometry_msgs::msg::PointStamped standby_pose;
-            standby_pose.header.frame_id = "map";
-            standby_pose.header.stamp = this->get_clock()->now();
-            standby_pose.point.x = standby_pose_x_;
-            standby_pose.point.y = standby_pose_y_;
-            standby_pose.point.z = 0.0;
+            auto standby_pose = createPointStamped(standby_pose_x_, standby_pose_y_, 0.0);
             pose_publisher_->publish(standby_pose);
-            // reroad_をpublish
             std_msgs::msg::Float64 motor_msg;
             motor_msg.data = reroad_;
             motor_pos_publisher_->publish(motor_msg);
-
             standby_timer_->cancel();
           });
     }
     else
     {
-      geometry_msgs::msg::PointStamped standby_pose;
-      standby_pose.header.frame_id = "map";
-      standby_pose.header.stamp = this->get_clock()->now();
-      standby_pose.point.x = standby_pose_x_;
-      standby_pose.point.y = standby_pose_y_;
-      standby_pose.point.z = 0.0;
+      auto standby_pose = createPointStamped(standby_pose_x_, standby_pose_y_, 0.0);
       pose_publisher_->publish(standby_pose);
-
       std_msgs::msg::Float64 motor_msg;
       motor_msg.data = reroad_;
       motor_pos_publisher_->publish(motor_msg);
@@ -376,7 +304,7 @@ namespace impact_point_estimator
 
   void ImpactPointEstimator::publish_motor_pos(double angle_rad)
   {
-    auto message = std_msgs::msg::Float64();
+    std_msgs::msg::Float64 message;
     message.data = angle_rad;
     motor_pos_publisher_->publish(message);
     RCLCPP_INFO(this->get_logger(), "Published motor_pos_: %f rad", angle_rad);
@@ -384,68 +312,28 @@ namespace impact_point_estimator
 
   void ImpactPointEstimator::publish_two_ball_marker(const geometry_msgs::msg::Point &point1, const geometry_msgs::msg::Point &point2)
   {
-    visualization_msgs::msg::Marker ball_marker;
-    ball_marker.header.frame_id = "map";
-    ball_marker.header.stamp = this->get_clock()->now();
-    ball_marker.ns = "ball_markers";
-    ball_marker.id = 0;
-    ball_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
-    ball_marker.action = visualization_msgs::msg::Marker::ADD;
-
-    // ボールのサイズを設定
-    ball_marker.scale.x = 0.1;
-    ball_marker.scale.y = 0.1;
-    ball_marker.scale.z = 0.1;
-
-    // ボールの色を設定（黄色）
-    ball_marker.color.r = 1.0;
-    ball_marker.color.g = 1.0;
-    ball_marker.color.b = 0.0;
-    ball_marker.color.a = 1.0;
-
-    // ボールの位置を追加
-    ball_marker.points.emplace_back(point1);
-    ball_marker.points.emplace_back(point2);
-
-    // マーカーをパブリッシュ
+    auto ball_marker = createMarker("ball_markers", 0, visualization_msgs::msg::Marker::SPHERE_LIST,
+                                    0.1, 0.1, 0.1,
+                                    1.0, 1.0, 0.0, 1.0);
+    ball_marker.points.push_back(point1);
+    ball_marker.points.push_back(point2);
     publisher_->publish(ball_marker);
   }
 
   void ImpactPointEstimator::publish_linear_trajectory_marker(const std::vector<geometry_msgs::msg::Point> &trajectory_points)
   {
-    visualization_msgs::msg::Marker trajectory_marker;
-    trajectory_marker.header.frame_id = "map";
-    trajectory_marker.header.stamp = this->get_clock()->now();
-    trajectory_marker.ns = "linear_trajectory";
-    trajectory_marker.id = 1;
-    trajectory_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    trajectory_marker.action = visualization_msgs::msg::Marker::ADD;
-    trajectory_marker.scale.x = 0.05; // 線の太さ
-
-    // 色の設定（青色）
-    trajectory_marker.color.r = 0.0;
-    trajectory_marker.color.g = 0.0;
-    trajectory_marker.color.b = 1.0;
-    trajectory_marker.color.a = 0.5;
-
+    auto trajectory_marker = createMarker("linear_trajectory", 1, visualization_msgs::msg::Marker::LINE_STRIP,
+                                          0.05, 0.05, 0.05,
+                                          0.0, 0.0, 1.0, 0.5);
     trajectory_marker.points = trajectory_points;
     publisher_->publish(trajectory_marker);
   }
 
   void ImpactPointEstimator::publish_three_points_curve(const std::vector<geometry_msgs::msg::Point> &curve_points)
   {
-    visualization_msgs::msg::Marker marker;
-    marker.header.frame_id = "map";
-    marker.header.stamp = this->get_clock()->now();
-    marker.ns = "cubic_curve";
-    marker.id = 0;
-    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-    marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.scale.x = 0.05; // 線の幅
-    marker.color.r = 0.5;
-    marker.color.g = 0.0;
-    marker.color.b = 0.5;
-    marker.color.a = 0.5;
+    auto marker = createMarker("cubic_curve", 0, visualization_msgs::msg::Marker::LINE_STRIP,
+                               0.05, 0.05, 0.05,
+                               0.5, 0.0, 0.5, 0.5);
     marker.points = curve_points;
     publisher_->publish(marker);
   }
