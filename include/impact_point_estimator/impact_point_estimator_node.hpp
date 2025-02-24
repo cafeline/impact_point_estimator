@@ -39,6 +39,12 @@ namespace impact_point_estimator
     void scheduleMotorPosition(double delay);
     void scheduleStandby(double delay);
 
+    void processTimeout(const visualization_msgs::msg::Marker::SharedPtr msg,
+                          std::chrono::steady_clock::time_point now, double dt);
+    bool processIncomingPoint(const geometry_msgs::msg::Point &point,
+                                std::chrono::steady_clock::time_point now);
+    void processPrediction();
+
     // データ管理
     void clearData();
 

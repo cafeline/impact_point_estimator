@@ -88,33 +88,15 @@ namespace impact_point_estimator
       return;
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_point_time_).count();
-
     if (dt > 0.35)
     {
-      RCLCPP_WARN(this->get_logger(), "Timeout dt, clearing data.");
-      clearData();
-      last_point_time_ = now;
-      if (msg->pose.position.z > lidar_to_target_z_)
-      {
-        points_.push_back(msg->pose.position);
-        timestamps_.push_back(0.0);
-      }
+      processTimeout(msg, now, dt);
       return;
     }
     last_point_time_ = now;
-
-    // 点の検証
     const geometry_msgs::msg::Point &point = msg->pose.position;
-    geometry_msgs::msg::Point *lastValid = points_.empty() ? nullptr : &points_.back();
-    if (!filter_.isPointValid(point, recent_points_, lastValid, 0.1, lidar_to_target_z_))
-    {
-      RCLCPP_WARN(this->get_logger(), "Point validation failed.");
+    if (!processIncomingPoint(point, now))
       return;
-    }
-    points_.push_back(point);
-    double relative_time = std::chrono::duration<double>(now - start_time_).count();
-    timestamps_.push_back(relative_time);
-
     // 2点目以降で速度検証
     if (points_.size() == 2 && !filter_.validateVelocity(points_[0], points_[1], dt))
     {
@@ -122,27 +104,54 @@ namespace impact_point_estimator
       clearData();
       return;
     }
-
-    // 十分な点が溜まったら予測処理
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
-      predictor_.predictTrajectory(points_, timestamps_,
-                                   lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_,
-                                   [this](const PredictionResult &result)
-                                   {
-                                     if (result.success)
-                                     {
-                                       publishEstimatedImpact(result);
-                                       double adjusted_time = result.impact_time - points_.size() * 0.1 + offset_time_;
-                                       scheduleMotorPosition(adjusted_time);
-                                       // オリジナル点のマーカー送信例
-                                       auto marker = createMarker("original_points", 1, visualization_msgs::msg::Marker::SPHERE_LIST,
-                                                                  0.07, 0.07, 0.07, 0.0, 1.0, 0.5, 1.0);
-                                       marker.points = points_;
-                                       publishMarker(marker);
-                                     }
-                                   });
+      processPrediction();
     }
+  }
+
+  void ImpactPointEstimatorNode::processTimeout(const visualization_msgs::msg::Marker::SharedPtr msg,
+                                                std::chrono::steady_clock::time_point now, double dt)
+  {
+    RCLCPP_WARN(this->get_logger(), "Timeout dt, clearing data.");
+    clearData();
+    last_point_time_ = now;
+    if (msg->pose.position.z > lidar_to_target_z_)
+    {
+      points_.push_back(msg->pose.position);
+      timestamps_.push_back(0.0);
+    }
+  }
+
+  bool ImpactPointEstimatorNode::processIncomingPoint(const geometry_msgs::msg::Point &point,
+                                                      std::chrono::steady_clock::time_point now)
+  {
+    geometry_msgs::msg::Point *lastValid = points_.empty() ? nullptr : &points_.back();
+    if (!filter_.isPointValid(point, recent_points_, lastValid, 0.1, lidar_to_target_z_))
+    {
+      RCLCPP_WARN(this->get_logger(), "Point validation failed.");
+      return false;
+    }
+    points_.push_back(point);
+    double relative_time = std::chrono::duration<double>(now - start_time_).count();
+    timestamps_.push_back(relative_time);
+    return true;
+  }
+
+  void ImpactPointEstimatorNode::processPrediction()
+  {
+    predictor_.predictTrajectory(points_, timestamps_, +lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_,
+                                 [this](const PredictionResult &result)
+                                 {
+    if (result.success) {
+      publishEstimatedImpact(result);
+      double adjusted_time = result.impact_time - points_.size() * 0.1 + offset_time_;
+      scheduleMotorPosition(adjusted_time);
+      auto marker = createMarker("original_points", 1, visualization_msgs::msg::Marker::SPHERE_LIST,
+                                 0.07, 0.07, 0.07, 0.0, 1.0, 0.5, 1.0);
+      marker.points = points_;
+      publishMarker(marker);
+    } });
   }
 
   void ImpactPointEstimatorNode::publishEstimatedImpact(const PredictionResult &result)
