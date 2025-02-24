@@ -9,9 +9,9 @@ find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
 ament_auto_add_library(impact_point_estimator
-  src/impact_point_estimator.cpp
-  src/filter.cpp
-  src/prediction.cpp
+  src/impact_point_estimator_node.cpp
+  src/trajectory_filter.cpp
+  src/trajectory_predictor.cpp
 )
 
 ament_export_include_directories(include)
