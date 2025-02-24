@@ -36,30 +36,17 @@ namespace impact_point_estimator
                            double lidar_to_target_z,
                            PredictionCallback callback);
 
-    // 3点から立方曲線フィッティングを行い、目標高さにおける x,y を算出
-    std::vector<geometry_msgs::msg::Point> processThreePoints(const std::vector<geometry_msgs::msg::Point> &points,
-                                                              double lidar_to_target_z,
-                                                              PredictionCallback callback);
-
     // 弾道モデルから軌道点列を生成する
     std::vector<geometry_msgs::msg::Point> generateTrajectoryPoints(double x0, double y0, double z0,
                                                                     double vx, double vy, double vz,
                                                                     double impact_time) const;
 
   private:
-    // 立方曲線フィッティング（最小二乗法）
-    std::vector<geometry_msgs::msg::Point> fitCubicCurve(const std::vector<geometry_msgs::msg::Point> &points,
-                                                         Eigen::VectorXd &coeffs_x,
-                                                         Eigen::VectorXd &coeffs_y,
-                                                         Eigen::VectorXd &coeffs_z);
-
-    // RANSAC を用いた立方曲線フィッティング
-    std::vector<geometry_msgs::msg::Point> fitCubicCurveRANSAC(const std::vector<geometry_msgs::msg::Point> &points,
-                                                               Eigen::VectorXd &coeffs_x,
-                                                               Eigen::VectorXd &coeffs_y,
-                                                               Eigen::VectorXd &coeffs_z,
-                                                               double threshold = 0.1,
-                                                               int max_iterations = 1000);
+    // // 立方曲線フィッティング（最小二乗法）
+    // std::vector<geometry_msgs::msg::Point> fitCubicCurve(const std::vector<geometry_msgs::msg::Point> &points,
+    //                                                      Eigen::VectorXd &coeffs_x,
+    //                                                      Eigen::VectorXd &coeffs_y,
+    //                                                      Eigen::VectorXd &coeffs_z);
 
     // 弾道モデル（直線+重力項）によるフィッティング
     bool fitBallisticTrajectory(const std::vector<geometry_msgs::msg::Point> &points,

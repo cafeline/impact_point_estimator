@@ -15,7 +15,7 @@ namespace impact_point_estimator
       : Node(node_name, options),
         is_predicting_(true),
         // 仮の初期値。後ほどパラメータから再設定する
-        filter_(0.0, 0.0, {1.0, 0.0, -1.0}, 30.0),
+        filter_(0.0, 0.0, {1.0, 0.0, -1.0}, 60.0),
         predictor_()
   {
     RCLCPP_INFO(this->get_logger(), "Initializing ImpactPointEstimatorNode");
