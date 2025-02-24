@@ -12,15 +12,9 @@ namespace impact_point_estimator
   }
 
   ImpactPointEstimatorNode::ImpactPointEstimatorNode(const std::string &node_name, const rclcpp::NodeOptions &options)
-      : Node(node_name, options),
-        is_predicting_(true),
-        // 仮の初期値。後ほどパラメータから再設定する
-        filter_(0.0, 0.0, {1.0, 0.0, -1.0}, 60.0),
-        predictor_()
+      : Node(node_name, options)
   {
-    RCLCPP_INFO(this->get_logger(), "Initializing ImpactPointEstimatorNode");
-
-    // パラメータの取得
+    // ROSパラメータの取得
     motor_pos_ = this->get_parameter("motor_pos").as_double();
     offset_time_ = this->get_parameter("offset_time").as_double();
     curve_points_num_ = this->get_parameter("curve_points_num").as_int();
@@ -37,8 +31,10 @@ namespace impact_point_estimator
     first_goal_x_ = this->get_parameter("first_goal_x").as_double();
     standby_delay_ = this->get_parameter("standby_delay").as_double();
 
-    // フィルタの再初期化
-    filter_ = TrajectoryFilter(v_min_, v_max_, expected_direction_, theta_max_deg_);
+    core_ = std::make_unique<ImpactPointEstimatorCore>(v_min_, v_max_, expected_direction_,
+                                                       theta_max_deg_, curve_points_num_, lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_);
+
+    predictor_ = std::make_unique<TrajectoryPredictor>();
 
     marker_sub_ = this->create_subscription<visualization_msgs::msg::Marker>(
         "tennis_ball", 10, std::bind(&ImpactPointEstimatorNode::markerCallback, this, std::placeholders::_1));
@@ -46,8 +42,10 @@ namespace impact_point_estimator
     pose_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("target_pose", 10);
     motor_pub_ = this->create_publisher<std_msgs::msg::Float64>("motor/pos", 10);
 
-    last_point_time_ = std::chrono::steady_clock::now();
-    start_time_ = last_point_time_;
+    start_time_ = std::chrono::steady_clock::now();
+    last_time_ = start_time_;
+
+    RCLCPP_INFO(this->get_logger(), "Initialized ImpactPointEstimatorNode");
   }
 
   geometry_msgs::msg::PointStamped ImpactPointEstimatorNode::createPointStamped(double x, double y, double z) const
@@ -84,84 +82,40 @@ namespace impact_point_estimator
 
   void ImpactPointEstimatorNode::markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg)
   {
-    if (!is_predicting_)
-      return;
+    // 現在時刻取得
     auto now = std::chrono::steady_clock::now();
-    double dt = std::chrono::duration<double>(now - last_point_time_).count();
+    double dt = std::chrono::duration<double>(now - last_time_).count();
+
+    // タイムアウト判定：一定時間以上経過している場合は前回シーケンスを破棄し、start_time_をリセット
     if (dt > 0.35)
     {
-      processTimeout(msg, now, dt);
-      return;
+      core_->clearData();
+      start_time_ = now; // 次の最初のボールのタイムスタンプを0.0にするためリセット
     }
-    last_point_time_ = now;
-    const geometry_msgs::msg::Point &point = msg->pose.position;
-    if (!processIncomingPoint(point, now))
-      return;
-    // 2点目以降で速度検証
-    if (points_.size() == 2 && !filter_.validateVelocity(points_[0], points_[1], dt))
-    {
-      RCLCPP_WARN(this->get_logger(), "Velocity validation failed.");
-      clearData();
-      return;
-    }
-    if (points_.size() >= static_cast<size_t>(curve_points_num_))
-    {
-      processPrediction();
-    }
-  }
+    last_time_ = now;
 
-  void ImpactPointEstimatorNode::processTimeout(const visualization_msgs::msg::Marker::SharedPtr msg,
-                                                std::chrono::steady_clock::time_point now, double dt)
-  {
-    RCLCPP_WARN(this->get_logger(), "Timeout dt, clearing data.");
-    clearData();
-    last_point_time_ = now;
-    if (msg->pose.position.z > lidar_to_target_z_)
-    {
-      points_.push_back(msg->pose.position);
-      timestamps_.push_back(0.0);
-    }
-  }
+    // 現在時刻との差からタイムスタンプを計算（タイムアウト後は0.0になる）
+    double timestamp = std::chrono::duration<double>(now - start_time_).count();
 
-  bool ImpactPointEstimatorNode::processIncomingPoint(const geometry_msgs::msg::Point &point,
-                                                      std::chrono::steady_clock::time_point now)
-  {
-    geometry_msgs::msg::Point *lastValid = points_.empty() ? nullptr : &points_.back();
-    if (!filter_.isPointValid(point, recent_points_, lastValid, 0.1, lidar_to_target_z_))
+    // コア処理に点を渡す
+    PredictionResult result;
+    bool predictionAvailable = core_->processPoint(msg->pose.position, timestamp, result);
+    if (predictionAvailable && result.success)
     {
-      RCLCPP_WARN(this->get_logger(), "Point validation failed.");
-      return false;
-    }
-    points_.push_back(point);
-    double relative_time = std::chrono::duration<double>(now - start_time_).count();
-    timestamps_.push_back(relative_time);
-    return true;
-  }
-
-  void ImpactPointEstimatorNode::processPrediction()
-  {
-    predictor_.predictTrajectory(points_, timestamps_, +lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_,
-                                 [this](const PredictionResult &result)
-                                 {
-    if (result.success) {
       publishEstimatedImpact(result);
-      double adjusted_time = result.impact_time - points_.size() * 0.1 + offset_time_;
+      double adjusted_time = result.impact_time - static_cast<double>(curve_points_num_) * 0.1 + offset_time_;
       scheduleMotorPosition(adjusted_time);
-      auto marker = createMarker("original_points", 1, visualization_msgs::msg::Marker::SPHERE_LIST,
-                                 0.07, 0.07, 0.07, 0.0, 1.0, 0.5, 1.0);
-      marker.points = points_;
-      publishMarker(marker);
-    } });
+    }
   }
 
   void ImpactPointEstimatorNode::publishEstimatedImpact(const PredictionResult &result)
   {
-    RCLCPP_INFO(this->get_logger(), "Impact at time: %.2f, location: (%.3f, %.3f)",
-                result.impact_time, result.x_impact, result.y_impact);
+    // RCLCPP_INFO(this->get_logger(), "Impact at time: %.2f, location: (%.3f, %.3f)", result.impact_time, result.x_impact, result.y_impact);
     auto target_pose = createPointStamped(result.x_impact, result.y_impact, 0.0);
     publishTargetPose(target_pose.point);
-    auto trajectory = predictor_.generateTrajectoryPoints(result.x0, result.y0, result.z0,
-                                                          result.vx, result.vy, result.vz, result.impact_time);
+
+    auto trajectory = predictor_->generateTrajectoryPoints(result.x0, result.y0, result.z0,
+                                                           result.vx, result.vy, result.vz, result.impact_time);
     auto marker = createMarker("fitted_curve", 0, visualization_msgs::msg::Marker::LINE_STRIP,
                                0.02, 0.02, 0.02, 1.0, 0.0, 0.0, 1.0);
     marker.points = trajectory;
@@ -185,7 +139,7 @@ namespace impact_point_estimator
     std_msgs::msg::Float64 msg;
     msg.data = angle_rad;
     motor_pub_->publish(msg);
-    RCLCPP_INFO(this->get_logger(), "Motor position published: %.2f", angle_rad);
+    // RCLCPP_INFO(this->get_logger(), "Motor position published: %.2f", angle_rad);
   }
 
   void ImpactPointEstimatorNode::scheduleMotorPosition(double delay)
@@ -195,8 +149,8 @@ namespace impact_point_estimator
       auto delay_ms = std::chrono::milliseconds(static_cast<int>(delay * 1000));
       timer_ = this->create_wall_timer(delay_ms, [this]()
                                        {
-      publishMotorPosition(motor_pos_);
-      timer_->cancel(); });
+        publishMotorPosition(motor_pos_);
+        timer_->cancel(); });
     }
     else
     {
@@ -211,12 +165,12 @@ namespace impact_point_estimator
       auto delay_ms = std::chrono::milliseconds(static_cast<int>(delay * 1000));
       standby_timer_ = this->create_wall_timer(delay_ms, [this]()
                                                {
-      auto standby_pose = createPointStamped(standby_pose_x_, standby_pose_y_, 0.0);
-      publishTargetPose(standby_pose.point);
-      std_msgs::msg::Float64 motor_msg;
-      motor_msg.data = reroad_;
-      motor_pub_->publish(motor_msg);
-      standby_timer_->cancel(); });
+        auto standby_pose = createPointStamped(standby_pose_x_, standby_pose_y_, 0.0);
+        publishTargetPose(standby_pose.point);
+        std_msgs::msg::Float64 motor_msg;
+        motor_msg.data = reroad_;
+        motor_pub_->publish(motor_msg);
+        standby_timer_->cancel(); });
     }
     else
     {
@@ -226,14 +180,6 @@ namespace impact_point_estimator
       motor_msg.data = reroad_;
       motor_pub_->publish(motor_msg);
     }
-  }
-
-  void ImpactPointEstimatorNode::clearData()
-  {
-    points_.clear();
-    recent_points_.clear();
-    timestamps_.clear();
-    start_time_ = std::chrono::steady_clock::now();
   }
 
 } // namespace impact_point_estimator

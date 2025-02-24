@@ -35,12 +35,6 @@ namespace impact_point_estimator
                   "Speed %.2f out of range [%.2f, %.2f]", speed, v_min_, v_max_);
       return false;
     }
-
-    if (speed == 0.0)
-    {
-      RCLCPP_WARN(rclcpp::get_logger("TrajectoryFilter"), "Zero speed detected.");
-      return false;
-    }
     std::vector<double> vel_norm = {last_velocity_.x / speed, last_velocity_.y / speed, last_velocity_.z / speed};
     double dot = 0.0;
     for (size_t i = 0; i < normalized_direction_.size(); ++i)
@@ -73,6 +67,9 @@ namespace impact_point_estimator
     {
       for (size_t i = 1; i < recentPoints.size(); ++i)
       {
+        RCLCPP_INFO(rclcpp::get_logger("TrajectoryFilter"),
+                    "recentPoints[%d].x = %.2f, recentPoints[%d].x = %.2f",
+                    i, recentPoints[i].x, i - 1, recentPoints[i - 1].x);
         if (recentPoints[i].x > recentPoints[i - 1].x)
         {
           return false;

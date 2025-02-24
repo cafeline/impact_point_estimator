@@ -4,15 +4,17 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <std_msgs/msg/float64.hpp>
-#include <deque>
-#include <vector>
+#include <memory>
 
 #include "impact_point_estimator/trajectory_filter.hpp"
 #include "impact_point_estimator/trajectory_predictor.hpp"
+#include "impact_point_estimator/impact_point_estimator_core.hpp"
 
 namespace impact_point_estimator
 {
 
+  // ImpactPointEstimatorNode は ROS2 の入出力とタイマー管理のみを行い、
+  // 実際の処理は ImpactPointEstimatorCore に任せるラッパークラスとする
   class ImpactPointEstimatorNode : public rclcpp::Node
   {
   public:
@@ -20,33 +22,22 @@ namespace impact_point_estimator
     ImpactPointEstimatorNode(const std::string &node_name, const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
 
   private:
-    // コールバック
+    // ROS コールバック
     void markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg);
 
-    // ユーティリティ：PointStamped, Marker 作成
+    // ROS メッセージ生成ヘルパー
     geometry_msgs::msg::PointStamped createPointStamped(double x, double y, double z) const;
     visualization_msgs::msg::Marker createMarker(const std::string &ns, int id, int type,
                                                  double scale_x, double scale_y, double scale_z,
                                                  double r, double g, double b, double a) const;
 
-    // パブリッシャーへの送信ヘルパー
+    // ROS 出力ヘルパー
     void publishEstimatedImpact(const PredictionResult &result);
     void publishMarker(const visualization_msgs::msg::Marker &marker);
     void publishTargetPose(const geometry_msgs::msg::Point &point);
     void publishMotorPosition(double angle_rad);
-
-    // タイマー処理
     void scheduleMotorPosition(double delay);
     void scheduleStandby(double delay);
-
-    void processTimeout(const visualization_msgs::msg::Marker::SharedPtr msg,
-                          std::chrono::steady_clock::time_point now, double dt);
-    bool processIncomingPoint(const geometry_msgs::msg::Point &point,
-                                std::chrono::steady_clock::time_point now);
-    void processPrediction();
-
-    // データ管理
-    void clearData();
 
     // ROS インターフェース
     rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr marker_sub_;
@@ -56,15 +47,10 @@ namespace impact_point_estimator
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr standby_timer_;
 
-    // 状態管理
-    bool is_predicting_;
-    std::vector<geometry_msgs::msg::Point> points_;
-    std::deque<geometry_msgs::msg::Point> recent_points_;
-    std::vector<double> timestamps_;
-    std::chrono::steady_clock::time_point last_point_time_;
-    std::chrono::steady_clock::time_point start_time_;
+    std::unique_ptr<ImpactPointEstimatorCore> core_;
+    std::unique_ptr<TrajectoryPredictor> predictor_;
 
-    // パラメータ
+    // パラメータ（ROSパラメータから取得）
     double motor_pos_;
     double offset_time_;
     int curve_points_num_;
@@ -81,9 +67,8 @@ namespace impact_point_estimator
     double first_goal_x_;
     double standby_delay_;
 
-    // フィルタと予測クラス
-    TrajectoryFilter filter_;
-    TrajectoryPredictor predictor_;
+    std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point last_time_;
   };
 
 } // namespace impact_point_estimator

@@ -42,12 +42,6 @@ namespace impact_point_estimator
                                                                     double impact_time) const;
 
   private:
-    // // 立方曲線フィッティング（最小二乗法）
-    // std::vector<geometry_msgs::msg::Point> fitCubicCurve(const std::vector<geometry_msgs::msg::Point> &points,
-    //                                                      Eigen::VectorXd &coeffs_x,
-    //                                                      Eigen::VectorXd &coeffs_y,
-    //                                                      Eigen::VectorXd &coeffs_z);
-
     // 弾道モデル（直線+重力項）によるフィッティング
     bool fitBallisticTrajectory(const std::vector<geometry_msgs::msg::Point> &points,
                                 const std::vector<double> &times,
