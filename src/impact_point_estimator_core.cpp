@@ -32,8 +32,6 @@ namespace impact_point_estimator
     points_.push_back(point);
     timestamps_.push_back(timestamp);
     recent_points_.push_back(point);
-    if (recent_points_.size() > 5)
-      recent_points_.pop_front();
     return true;
   }
 
@@ -44,12 +42,11 @@ namespace impact_point_estimator
 
     if (points_.size() >= static_cast<size_t>(curve_points_num_))
     {
-      // 予測処理を呼び出し、結果を同期的に predictionResult に格納する
-      for (int i = 0; i < points_.size(); i++)
-      {
-        // RCLCPP_INFO(rclcpp::get_logger("ImpactPointEstimatorCore"), "points_[%d]: x=%f, y=%f, z=%f", i, points_[i].x, points_[i].y, points_[i].z);
-        // RCLCPP_INFO(rclcpp::get_logger("ImpactPointEstimatorCore"), "timestamp: %f", timestamps_[i]);
-      }
+      // for (int i = 0; i < points_.size(); i++)
+      // {
+      //   RCLCPP_INFO(rclcpp::get_logger("ImpactPointEstimatorCore"), "points_[%d]: x=%f, y=%f, z=%f", i, points_[i].x, points_[i].y, points_[i].z);
+      //   RCLCPP_INFO(rclcpp::get_logger("ImpactPointEstimatorCore"), "timestamp: %f", timestamps_[i]);
+      // }
       predictor_.predictTrajectory(points_, timestamps_,
                                    lidar_to_target_x_, lidar_to_target_y_, lidar_to_target_z_,
                                    [&predictionResult](const PredictionResult &result)

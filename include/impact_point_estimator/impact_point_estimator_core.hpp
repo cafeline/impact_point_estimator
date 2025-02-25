@@ -10,7 +10,6 @@
 namespace impact_point_estimator
 {
 
-  // ImpactPointEstimatorCore は実際の処理ロジック（点の蓄積、フィルタ、予測）を実装する
   class ImpactPointEstimatorCore
   {
   public:
@@ -27,7 +26,6 @@ namespace impact_point_estimator
     // 戻り値が true なら predictionResult に予測結果が格納される
     bool processPoint(const geometry_msgs::msg::Point &point, double timestamp, PredictionResult &predictionResult);
 
-    // 保持データのクリア（タイムアウト時に呼び出し、次の最初のボールのタイムスタンプを0.0にする）
     void clearData();
 
   private:
@@ -39,7 +37,6 @@ namespace impact_point_estimator
     double lidar_to_target_z_;
     double minDistance_;
 
-    // 蓄積データ
     std::vector<geometry_msgs::msg::Point> points_;
     std::vector<double> timestamps_;
     std::deque<geometry_msgs::msg::Point> recent_points_;

@@ -36,7 +36,7 @@ namespace impact_point_estimator
                            double lidar_to_target_z,
                            PredictionCallback callback);
 
-    // 弾道モデルから軌道点列を生成する
+    // 弾道モデルから軌道点列を生成する（可視化用）
     std::vector<geometry_msgs::msg::Point> generateTrajectoryPoints(double x0, double y0, double z0,
                                                                     double vx, double vy, double vz,
                                                                     double impact_time) const;

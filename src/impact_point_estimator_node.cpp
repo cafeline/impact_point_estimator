@@ -14,7 +14,6 @@ namespace impact_point_estimator
   ImpactPointEstimatorNode::ImpactPointEstimatorNode(const std::string &node_name, const rclcpp::NodeOptions &options)
       : Node(node_name, options)
   {
-    // ROSパラメータの取得
     motor_pos_ = this->get_parameter("motor_pos").as_double();
     offset_time_ = this->get_parameter("offset_time").as_double();
     curve_points_num_ = this->get_parameter("curve_points_num").as_int();
@@ -82,11 +81,9 @@ namespace impact_point_estimator
 
   void ImpactPointEstimatorNode::markerCallback(const visualization_msgs::msg::Marker::SharedPtr msg)
   {
-    // 現在時刻取得
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_time_).count();
 
-    // タイムアウト判定：一定時間以上経過している場合は前回シーケンスを破棄し、start_time_をリセット
     if (dt > 0.35)
     {
       core_->clearData();
@@ -97,7 +94,6 @@ namespace impact_point_estimator
     // 現在時刻との差からタイムスタンプを計算（タイムアウト後は0.0になる）
     double timestamp = std::chrono::duration<double>(now - start_time_).count();
 
-    // コア処理に点を渡す
     PredictionResult result;
     bool predictionAvailable = core_->processPoint(msg->pose.position, timestamp, result);
     if (predictionAvailable && result.success)
@@ -110,7 +106,6 @@ namespace impact_point_estimator
 
   void ImpactPointEstimatorNode::publishEstimatedImpact(const PredictionResult &result)
   {
-    // まず軌道の可視化は常に行う
     auto trajectory = predictor_->generateTrajectoryPoints(result.x0, result.y0, result.z0,
                                                            result.vx, result.vy, result.vz, result.impact_time);
     auto marker = createMarker("fitted_curve", 0, visualization_msgs::msg::Marker::LINE_STRIP,
