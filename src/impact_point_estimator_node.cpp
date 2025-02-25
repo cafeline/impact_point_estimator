@@ -110,16 +110,20 @@ namespace impact_point_estimator
 
   void ImpactPointEstimatorNode::publishEstimatedImpact(const PredictionResult &result)
   {
-    // RCLCPP_INFO(this->get_logger(), "Impact at time: %.2f, location: (%.3f, %.3f)", result.impact_time, result.x_impact, result.y_impact);
-    auto target_pose = createPointStamped(result.x_impact, result.y_impact, 0.0);
-    publishTargetPose(target_pose.point);
-
+    // まず軌道の可視化は常に行う
     auto trajectory = predictor_->generateTrajectoryPoints(result.x0, result.y0, result.z0,
                                                            result.vx, result.vy, result.vz, result.impact_time);
     auto marker = createMarker("fitted_curve", 0, visualization_msgs::msg::Marker::LINE_STRIP,
                                0.02, 0.02, 0.02, 1.0, 0.0, 0.0, 1.0);
     marker.points = trajectory;
     publishMarker(marker);
+
+    // 弾道の予測結果のx方向の速度が負の場合のみターゲットポーズを発行
+    if (result.vx < 0)
+    {
+      auto target_pose = createPointStamped(result.x_impact, result.y_impact, 0.0);
+      publishTargetPose(target_pose.point);
+    }
   }
 
   void ImpactPointEstimatorNode::publishMarker(const visualization_msgs::msg::Marker &marker)

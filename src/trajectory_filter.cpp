@@ -62,20 +62,20 @@ namespace impact_point_estimator
     {
       return false;
     }
-    // 最近の点が x 座標で降順になっているかチェック
-    if (!recentPoints.empty())
-    {
-      for (size_t i = 1; i < recentPoints.size(); ++i)
-      {
-        RCLCPP_INFO(rclcpp::get_logger("TrajectoryFilter"),
-                    "recentPoints[%d].x = %.2f, recentPoints[%d].x = %.2f",
-                    i, recentPoints[i].x, i - 1, recentPoints[i - 1].x);
-        if (recentPoints[i].x > recentPoints[i - 1].x)
-        {
-          return false;
-        }
-      }
-    }
+    // // 最近の点が x 座標で降順になっているかチェック
+    // if (!recentPoints.empty())
+    // {
+    //   for (size_t i = 1; i < recentPoints.size(); ++i)
+    //   {
+    //     RCLCPP_INFO(rclcpp::get_logger("TrajectoryFilter"),
+    //                 "recentPoints[%d].x = %.2f, recentPoints[%d].x = %.2f",
+    //                 i, recentPoints[i].x, i - 1, recentPoints[i - 1].x);
+    //     if (recentPoints[i].x > recentPoints[i - 1].x)
+    //     {
+    //       return false;
+    //     }
+    //   }
+    // }
     // 最後の有効点との距離チェック（存在する場合）
     if (lastValidPoint)
     {
